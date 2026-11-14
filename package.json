@@ -1,0 +1,15 @@
+{
+  "name": "mise-decaid-skin",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Mise: a calm, plain-language skin for Decent espresso machines running Decaid.",
+  "scripts": {
+    "gateway": "node tools/mock-gateway.mjs",
+    "serve": "python3 -m http.server 24800",
+    "package": "rm -f mise-$npm_package_version.zip && zip -r -X -q mise-$npm_package_version.zip index.html skin-manifest.json styles.css README.md src fonts"
+  },
+  "devDependencies": {
+    "ws": "^8.18.0"
+  }
+}
