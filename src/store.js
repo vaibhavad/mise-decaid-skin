@@ -25,6 +25,12 @@ export const S = {
   review: null,              // the shot that just finished
   saving: '',                // '' | saving | saved | error
   toast: null,
+  settings: null,            // Decaid's own settings (gateway mode and so on)
+  presence: null,            // auto-sleep settings
+  display: null,             // screen brightness state
+  build: null,               // Decaid version info
+  names: {},                 // profile id -> name shown in Mise for built-in recipes
+  dialog: null,              // { record } while the rename dialog is open
 };
 
 let T = null;                // transport: { request, stream, demo }
@@ -92,6 +98,8 @@ export async function loadAll() {
     loadShots(),
     quiet(T.request('GET', api('/store/mise/favorites'))).then((ids) => { if (Array.isArray(ids)) S.favorites = ids; }),
     quiet(T.request('GET', api('/store/mise/cleaning'))).then((c) => { if (c && typeof c === 'object') S.cleaning = { ...S.cleaning, ...c }; }),
+    quiet(T.request('GET', api('/store/mise/names'))).then((n) => { if (n && typeof n === 'object' && !Array.isArray(n)) S.names = n; }),
+    quiet(T.request('GET', api('/settings'))).then((s) => { if (s && typeof s === 'object') S.settings = s; }),
   ]);
   if (S.cleaning.totalAtClean == null && S.shotsTotal != null) {
     S.cleaning.totalAtClean = S.shotsTotal;
@@ -217,7 +225,7 @@ function finishShot() {
   S.review = {
     endedAt: Date.now(),
     startedAt: shot.startedAt,
-    title: S.workflow?.profile?.title || 'Espresso',
+    title: displayTitle(S.workflow?.profile?.title) || 'Espresso',
     coffee: context.coffeeName || '',
     dose: Number(context.targetDoseWeight) || null,
     target: Number(context.targetYield) || null,
@@ -376,7 +384,7 @@ export function useProfile(record) {
   if (target > 0) body.context = { targetYield: target };
   S.workflow = deepMerge(S.workflow || {}, body);
   emit();
-  return putWorkflow(body, `Now using ${record.profile.title}`);
+  return putWorkflow(body, `Now using ${nameOf(record)}`);
 }
 
 export function brewAgain(shot) {
@@ -483,6 +491,7 @@ export function setCleanInterval(value) {
 
 export function go(view) {
   S.view = view;
+  if (view === 'settings') loadSettings();
   if (view === 'history') {
     if (!S.selectedShot && S.shots?.[0]) selectShot(S.shots[0].id);
     backfillTimes();
@@ -555,4 +564,160 @@ export function waterLabel() {
   if (w.currentLevel <= refill) return { text: 'Empty', low: true };
   if (w.currentLevel <= refill + 8) return { text: 'Low', low: true };
   return { text: 'OK', low: false };
+}
+
+// ── Recipe names ─────────────────────────────────────────────────────────
+// Decaid lets a skin rename recipes you made yourself. Its built-in recipes
+// cannot be changed, so for those Mise keeps the new name itself (in Decaid's
+// key-value store) and shows it wherever the recipe appears.
+
+export function nameOf(record) {
+  return S.names[record.id] || record.profile.title;
+}
+
+let titleMap = {};
+let titleMapProfiles = null;
+let titleMapNames = null;
+
+// For places that only know a recipe's original title (the current workflow,
+// saved shots).
+export function displayTitle(title) {
+  if (!title) return title;
+  if (titleMapProfiles !== S.profiles || titleMapNames !== S.names) {
+    titleMapProfiles = S.profiles;
+    titleMapNames = S.names;
+    titleMap = {};
+    for (const record of S.profiles || []) {
+      const alias = S.names[record.id];
+      if (alias && record.profile?.title) titleMap[record.profile.title] = alias;
+    }
+  }
+  return titleMap[title] || title;
+}
+
+function saveNames() {
+  T.request('POST', api('/store/mise/names'), S.names).catch(() => toast('Could not save the recipe name.'));
+}
+
+function setAlias(record, name) {
+  const names = { ...S.names };
+  if (!name || name === record.profile.title) delete names[record.id];
+  else names[record.id] = name;
+  S.names = names;
+  saveNames();
+}
+
+export async function renameProfile(record, input) {
+  const name = String(input || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (!name) { toast('Type a name first.'); return false; }
+  const original = record.profile.title;
+
+  if (record.isDefault === false && name !== original) {
+    try {
+      const updated = await T.request('PUT', api(`/profiles/${encodeURIComponent(record.id)}`), {
+        profile: { ...record.profile, title: name },
+      });
+      const next = updated?.profile ? updated : { ...record, profile: { ...record.profile, title: name } };
+      S.profiles = (S.profiles || []).map((r) => (r.id === record.id ? next : r));
+      if (next.id !== record.id && Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
+        S.favorites = S.favorites.map((id) => (id === record.id ? next.id : id));
+        quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+      }
+      if (S.names[record.id]) setAlias(record, null);
+      if (S.workflow?.profile?.title === original) queuePatch({ profile: { title: name } });
+      toast(`Renamed to ${name}`);
+      emit();
+      return true;
+    } catch {
+      // Decaid refused; keep the name in Mise instead.
+    }
+  }
+  setAlias(record, name);
+  toast(name === original ? 'Back to the original name' : `Renamed to ${name}`);
+  emit();
+  return true;
+}
+
+export function openRename(record) {
+  S.dialog = { record };
+  emit();
+}
+
+export function closeDialog() {
+  S.dialog = null;
+  emit();
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────
+
+export async function loadSettings() {
+  const [settings, presence, display, build] = await Promise.all([
+    quiet(T.request('GET', api('/settings'))),
+    quiet(T.request('GET', api('/presence/settings'))),
+    quiet(T.request('GET', api('/display'))),
+    quiet(T.request('GET', api('/info'))),
+  ]);
+  if (settings && typeof settings === 'object') S.settings = settings;
+  if (presence && typeof presence === 'object') S.presence = presence;
+  if (display && typeof display === 'object') S.display = display;
+  if (build && typeof build === 'object') S.build = build;
+  emit();
+}
+
+const NOT_SAVED = 'That setting could not be saved. Check the connection and try again.';
+
+export async function updateSettings(patch) {
+  if (!S.settings) return;
+  const before = S.settings;
+  S.settings = { ...before, ...patch };
+  emit();
+  try {
+    const result = await T.request('POST', api('/settings'), patch);
+    if (result && typeof result === 'object' && 'gatewayMode' in result) S.settings = { ...S.settings, ...result };
+  } catch {
+    S.settings = before;
+    toast(NOT_SAVED);
+  }
+  emit();
+}
+
+export async function updatePresence(patch) {
+  if (!S.presence) return;
+  const before = S.presence;
+  S.presence = { ...before, ...patch };
+  emit();
+  try {
+    await T.request('POST', api('/presence/settings'), patch);
+  } catch {
+    S.presence = before;
+    toast(NOT_SAVED);
+  }
+  emit();
+}
+
+export async function setBrightness(value) {
+  if (!S.display) return;
+  const brightness = clamp(Math.round(value / 10) * 10, 10, 100);
+  const before = S.display;
+  S.display = { ...before, brightness, requestedBrightness: brightness };
+  emit();
+  try {
+    const result = await T.request('PUT', api('/display/brightness'), { brightness });
+    if (result && typeof result === 'object' && 'brightness' in result) S.display = result;
+  } catch {
+    S.display = before;
+    toast(NOT_SAVED);
+  }
+  emit();
+}
+
+// Decaid's own, complete settings page. It is a separate page with its own
+// look; its Back button returns here.
+export function openDecaidSettings() {
+  if (S.mode !== 'live') { toast('That page belongs to Decaid. It is not part of the demo.'); return; }
+  location.href = `http://${S.host}/api/v1/plugins/settings.reaplugin/ui?backName=Mise`;
+}
+
+export function gatewayMode() {
+  return S.settings?.gatewayMode || null;
 }

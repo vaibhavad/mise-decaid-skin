@@ -158,7 +158,8 @@ export function createSim(options = {}) {
 
   const profiles = DEMO_PROFILES.map((p, i) => ({
     id: `profile:demo${i + 1}`, profile: clone(p), parentId: null,
-    visibility: 'visible', isDefault: true, metadata: {},
+    // One user-made recipe, so both kinds of rename can be tried in the demo.
+    visibility: 'visible', isDefault: p.title !== 'Long and light', metadata: {},
   }));
 
   let workflow = {
@@ -171,6 +172,17 @@ export function createSim(options = {}) {
     steamSettings: { targetTemperature: 150, duration: 45, flow: 0.8 },
     hotWaterData: { targetTemperature: 90, duration: 30, volume: 120, flow: 6 },
     rinseData: { targetTemperature: 90, duration: 5, flow: 6 },
+  };
+
+  let settings = {
+    gatewayMode: 'tracking', logLevel: 'INFO', weightFlowMultiplier: 1, volumeFlowMultiplier: 0.3,
+    hotWaterFlowMultiplier: 0.3, scalePowerMode: 'disconnect', blockOnNoScale: false,
+    blockTareDuringShot: false, stopHotWaterAtWeight: true, themeMode: 'system',
+  };
+  let presence = { userPresenceEnabled: true, sleepTimeoutMinutes: 30 };
+  const display = {
+    wakeLockEnabled: true, wakeLockOverride: false, brightness: 100, requestedBrightness: 100,
+    lowBatteryBrightnessActive: false, platformSupported: { brightness: true, wakeLock: true },
   };
 
   const machine = {
@@ -393,7 +405,18 @@ export function createSim(options = {}) {
     if (route === 'GET /api/v1/machine/state') return snapshot();
     if (route === 'GET /api/v1/machine/waterLevels') return { currentLevel: machine.water, refillLevel: machine.refill };
     if (route === 'POST /api/v1/machine/heartbeat') return { timeout: 1800 };
-    if (route === 'GET /api/v1/settings') return { gatewayMode: 'tracking' };
+    if (route === 'GET /api/v1/settings') return clone(settings);
+    if (route === 'POST /api/v1/settings') { settings = { ...settings, ...(body || {}) }; return clone(settings); }
+    if (route === 'GET /api/v1/presence/settings') return { ...presence, schedules: [] };
+    if (route === 'POST /api/v1/presence/settings') { presence = { ...presence, ...(body || {}) }; return clone(presence); }
+    if (route === 'GET /api/v1/display') return clone(display);
+    if (route === 'PUT /api/v1/display/brightness') {
+      const value = Number(body?.brightness);
+      if (!(value >= 0 && value <= 100)) throw httpError(400, 'brightness must be 0-100');
+      display.brightness = display.requestedBrightness = value;
+      return clone(display);
+    }
+    if (route === 'GET /api/v1/info') return { version: 'demo', fullVersion: 'demo', commitShort: 'demo', branch: 'demo' };
     if (route === 'GET /api/v1/workflow') return clone(workflow);
     if (route === 'PUT /api/v1/workflow') {
       if (body?.context === null) throw httpError(400, 'context must not be null');
@@ -401,6 +424,13 @@ export function createSim(options = {}) {
       return clone(workflow);
     }
     if (route === 'GET /api/v1/profiles') return clone(profiles);
+    if (method === 'PUT' && parts[0] === 'profiles' && parts.length === 2) {
+      const record = profiles.find((r) => r.id === decodeURIComponent(parts[1]));
+      if (!record) throw httpError(400, 'Profile not found');
+      if (record.isDefault && body?.profile) throw httpError(400, 'Cannot modify default profile content');
+      if (body?.profile) record.profile = clone(body.profile);
+      return clone(record);
+    }
     if (route === 'PUT /api/v1/scale/tare') { machine.weight = 0; return null; }
     if (method === 'PUT' && parts[0] === 'machine' && parts[1] === 'state') {
       const target = parts[2];

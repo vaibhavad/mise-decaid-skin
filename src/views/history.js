@@ -1,7 +1,7 @@
 // History: recent shots on the left, the selected one on the right.
 
 import { h, setText, show, replaceKids } from '../dom.js';
-import { S, selectShot, brewAgain } from '../store.js';
+import { S, selectShot, brewAgain, displayTitle } from '../store.js';
 import { num, ratio, when, trimNum, brewTemp } from '../format.js';
 import { createChart } from '../chart.js';
 import { card } from './parts.js';
@@ -64,7 +64,7 @@ export function createHistory() {
     const key = !shots ? 'loading' : shots.map((s) => {
       const f = figures(s);
       return `${s.id}:${f.out}:${f.seconds}:${f.taste}`;
-    }).join('|') + `#${S.selectedShot}`;
+    }).join('|') + `#${S.selectedShot}#${Object.values(S.names).join(',')}`;
     if (key === listKey) return;
     listKey = key;
     if (!shots) { replaceKids(list, [h('p', { class: 'muted empty', text: 'Loading shots…' })]); return; }
@@ -76,7 +76,7 @@ export function createHistory() {
         onClick: () => selectShot(shot.id),
       },
       h('strong', { text: when(shot.timestamp) }),
-      h('strong', { class: 'clip', text: shot.workflow?.profile?.title || shot.workflow?.name || 'Espresso' }),
+      h('strong', { class: 'clip', text: displayTitle(shot.workflow?.profile?.title) || shot.workflow?.name || 'Espresso' }),
       h('span', { text: `${f.dose ? num(f.dose, 1) : '–'} → ${f.out ? `${num(f.out, 1)} g` : '–'}` }),
       h('span', { text: f.seconds ? `${Math.round(f.seconds)} s` : '–' }),
       f.taste
@@ -94,7 +94,7 @@ export function createHistory() {
     const detail = S.shotDetails[shot.id];
     const f = figures(shot);
     const context = shot.workflow?.context || {};
-    setText(dWhen, `${when(shot.timestamp)} · ${shot.workflow?.profile?.title || 'Espresso'}`);
+    setText(dWhen, `${when(shot.timestamp)} · ${displayTitle(shot.workflow?.profile?.title) || 'Espresso'}`);
     setText(dOut, f.out ? `${num(f.out, 1)} g` : '–');
     setText(dTime, f.seconds ? `in ${Math.round(f.seconds)} s` : '');
     show(loading, !detail);

@@ -6,6 +6,7 @@ import { gatewayHost, httpTransport, savedGateway, forgetGateway } from './api.j
 import { createSim } from './sim.js';
 import {
   S, subscribe, connect, loadAll, go, requestState, heartbeat, toast, transport, reloadMachine, closeReview,
+  nameOf, renameProfile, closeDialog,
 } from './store.js';
 import { createHome } from './views/home.js';
 import { createBrewing } from './views/brewing.js';
@@ -13,8 +14,10 @@ import { createReview } from './views/review.js';
 import { createRecipes } from './views/recipes.js';
 import { createWater } from './views/water.js';
 import { createHistory } from './views/history.js';
+import { createSettings } from './views/settings.js';
 
-const VERSION = '0.1.1';
+const VERSION = '0.2.0';
+document.documentElement.dataset.miseVersion = VERSION;
 const app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 // A page can ask for the demo outright with <html data-demo>, for hosts that
@@ -55,10 +58,6 @@ function leaveDemo() {
   location.href = location.pathname;
 }
 
-function openSettings() {
-  if (S.mode !== 'live') { toast('Settings open in Decaid. They are not part of the demo.'); return; }
-  location.href = `http://${S.host}/api/v1/plugins/settings.reaplugin/ui?backName=Mise`;
-}
 
 // Inside the Decaid app a skin fills the screen, and on tablets set to button
 // navigation there is no edge swipe to leave it. Decaid gives embedded skins
@@ -68,11 +67,16 @@ function exitToDecaid() {
 }
 const exitButton = h('button', { class: 'rail-item', type: 'button', hidden: true, 'aria-label': 'Exit to the Decaid dashboard', onClick: exitToDecaid }, icon('exit'), h('span', { text: 'Exit' }));
 
+const settingsButton = h('button', {
+  class: 'rail-item', type: 'button',
+  onClick: () => { if (S.view === 'review') closeReview(); go('settings'); },
+}, icon('settings'), h('span', { text: 'Settings' }));
+
 const rail = h('nav', { class: 'rail', 'aria-label': 'Main' },
   h('div', { class: 'rail-group' }, h('div', { class: 'wordmark', text: 'mise' }), navButtons),
   h('div', { class: 'rail-group' },
     demoBadge,
-    h('button', { class: 'rail-item', type: 'button', onClick: openSettings }, icon('settings'), h('span', { text: 'Settings' })),
+    settingsButton,
     exitButton,
     h('button', { class: 'rail-item', type: 'button', onClick: () => requestState('sleeping') }, icon('sleep'), h('span', { text: 'Sleep' }))));
 
@@ -98,13 +102,58 @@ const cover = h('div', { class: 'cover', hidden: true },
   h('div', { class: 'cover-actions' }, retry, forget, tryDemo),
   h('span', { class: 'muted small', text: `Version ${VERSION}` }));
 
-app.append(rail, main, cover, sleepScreen, demoPanel, toastEl);
+// Rename dialog
+const renameInput = h('input', { id: 'rename-input', class: 'input', type: 'text', autocomplete: 'off', maxlength: '60' });
+const renameNote = h('p', { class: 'muted small' });
+const renameOriginal = h('button', { class: 'link', type: 'button', text: 'Use the original name' });
+const renameSave = h('button', { class: 'btn btn-primary', type: 'submit', text: 'Save' });
+const renameForm = h('form', { class: 'dialog', 'aria-labelledby': 'rename-title' },
+  h('h2', { class: 'card-title', id: 'rename-title', text: 'Rename recipe' }),
+  h('div', { class: 'field' }, h('label', { class: 'label', for: 'rename-input', text: 'Name' }), renameInput),
+  renameNote,
+  h('div', { class: 'dialog-actions' },
+    renameOriginal,
+    h('button', { class: 'btn btn-outline', type: 'button', onClick: closeDialog, text: 'Cancel' }),
+    renameSave));
+const dialogBackdrop = h('div', { class: 'backdrop', hidden: true }, renameForm);
+let dialogFor = null;
+
+async function submitRename(value) {
+  const record = S.dialog?.record;
+  if (!record) return;
+  renameSave.disabled = true;
+  const ok = await renameProfile(record, value);
+  renameSave.disabled = false;
+  if (ok) closeDialog();
+}
+renameForm.addEventListener('submit', (event) => { event.preventDefault(); submitRename(renameInput.value); });
+renameOriginal.addEventListener('click', () => submitRename(S.dialog?.record?.profile?.title));
+dialogBackdrop.addEventListener('pointerdown', (event) => { if (event.target === dialogBackdrop) closeDialog(); });
+
+function renderDialog() {
+  const dialog = S.dialog;
+  show(dialogBackdrop, Boolean(dialog));
+  if (!dialog) { dialogFor = null; return; }
+  if (dialogFor === dialog) return;
+  dialogFor = dialog;
+  const record = dialog.record;
+  renameInput.value = nameOf(record);
+  const builtIn = record.isDefault !== false;
+  setText(renameNote, builtIn
+    ? `This is one of Decaid's built-in recipes, called "${record.profile.title}". Decaid does not let them be renamed, so the new name is used in Mise only.`
+    : 'This is a recipe you made, so the name changes in Decaid and other skins too.');
+  show(renameOriginal, Boolean(S.names[record.id]));
+  renameInput.focus();
+  renameInput.select();
+}
+
+app.append(rail, main, cover, sleepScreen, demoPanel, dialogBackdrop, toastEl);
 
 // ── Screens ──────────────────────────────────────────────────────────────
 
 const factories = {
   home: createHome, recipes: createRecipes, water: createWater,
-  history: createHistory, review: createReview, brewing: createBrewing,
+  history: createHistory, review: createReview, brewing: createBrewing, settings: createSettings,
 };
 const screens = {};
 let current = null;
@@ -148,7 +197,9 @@ function render() {
     const active = item.view === name || (name === 'review' && item.view === 'home');
     setAttr(navButtons[i], 'aria-current', active ? 'page' : null);
   });
+  setAttr(settingsButton, 'aria-current', name === 'settings' ? 'page' : null);
   screen(name).update();
+  renderDialog();
 
   show(toastEl, Boolean(S.toast));
   if (S.toast) setText(toastEl, S.toast);

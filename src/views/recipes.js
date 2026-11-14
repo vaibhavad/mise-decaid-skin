@@ -2,7 +2,7 @@
 // use it; star up to five to keep them on the Brew screen.
 
 import { h, setAttr, replaceKids, icon } from '../dom.js';
-import { S, visibleProfiles, favoriteIds, toggleFavorite, useProfile, isInUse } from '../store.js';
+import { S, visibleProfiles, favoriteIds, toggleFavorite, useProfile, isInUse, nameOf, openRename } from '../store.js';
 import { firstSentence } from '../format.js';
 import { profileCurve } from '../chart.js';
 
@@ -41,10 +41,11 @@ export function createRecipes() {
     const all = visibleProfiles();
     const favs = favoriteIds();
     const current = S.workflow?.profile?.title || '';
-    const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${query}`;
+    const titles = all.map((r) => nameOf(r)).join('\u0001');
+    const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${query}|${titles}`;
     if (next === key) return;
     key = next;
-    count.textContent = 'Tap a recipe to use it. Star up to five to keep them on the Brew screen.';
+    count.textContent = 'Tap a recipe to use it. Star up to five for the Brew screen. The pencil renames one.';
 
     if (!S.profiles) {
       replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]);
@@ -54,9 +55,9 @@ export function createRecipes() {
       const p = record.profile;
       if (filter === 'Starred' && !favs.includes(record.id)) return false;
       if (filter !== 'All' && filter !== 'Starred' && kind(p) !== filter) return false;
-      if (query && !`${p.title} ${p.notes || ''} ${p.author || ''}`.toLowerCase().includes(query)) return false;
+      if (query && !`${nameOf(record)} ${p.title} ${p.notes || ''} ${p.author || ''}`.toLowerCase().includes(query)) return false;
       return true;
-    }).sort((a, b) => a.profile.title.localeCompare(b.profile.title));
+    }).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
     if (!shown.length) {
       replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'No starred recipes yet. Tap a star to add one.' : 'No recipes match.' })]);
@@ -69,16 +70,20 @@ export function createRecipes() {
       return h('article', { class: 'recipe', 'data-in-use': inUse ? 'true' : null },
         h('button', { class: 'recipe-main', type: 'button', onClick: () => useProfile(record) },
           profileCurve(p),
-          h('span', { class: 'recipe-card-title', text: p.title }),
+          h('span', { class: 'recipe-card-title', text: nameOf(record) }),
           h('span', { class: 'recipe-card-text muted', text: firstSentence(p.notes, 120) || 'No description.' }),
           h('span', { class: 'tags' },
             inUse ? h('span', { class: 'pill pill-solid', text: 'In use' }) : null,
             h('span', { class: 'pill pill-quiet', text: kind(p) }))),
         h('button', {
           class: 'star', type: 'button', 'aria-pressed': starred ? 'true' : 'false',
-          'aria-label': `${starred ? 'Remove star from' : 'Star'} ${p.title}`,
+          'aria-label': `${starred ? 'Remove star from' : 'Star'} ${nameOf(record)}`,
           onClick: () => toggleFavorite(record.id),
-        }, icon('star', 'icon icon-star')));
+        }, icon('star', 'icon icon-star')),
+        h('button', {
+          class: 'star star-edit', type: 'button', 'aria-label': `Rename ${nameOf(record)}`,
+          onClick: () => openRename(record),
+        }, icon('pencil')));
     }));
   }
 

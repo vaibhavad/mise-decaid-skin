@@ -4,6 +4,7 @@ import { h, setText, setAttr, show, replaceKids } from '../dom.js';
 import {
   S, status, values, setDose, setOut, setTemp, setGrind, go, requestState, scan, transport,
   visibleProfiles, favoriteIds, useProfile, isInUse, cleaningDue, shotsSinceClean, selectShot,
+  displayTitle, nameOf, openRename, gatewayMode,
 } from '../store.js';
 import { num, trimNum, ratio, firstSentence, when } from '../format.js';
 import { profileCurve, miniChart } from '../chart.js';
@@ -14,6 +15,7 @@ export function createHome() {
 
   // Recipe card
   const title = h('h2', { class: 'recipe-title' });
+  const rename = h('button', { class: 'link link-inline', type: 'button', text: 'Rename' });
   const coffee = h('span', { class: 'muted' });
   const curveBox = h('div', { class: 'recipe-curve' });
   const blurb = h('span', { class: 'recipe-blurb muted' });
@@ -34,7 +36,8 @@ export function createHome() {
 
   const recipe = card('recipe-card',
     h('div', { class: 'recipe-top' },
-      h('div', { class: 'recipe-name' }, h('span', { class: 'label', text: 'Recipe' }), title, coffee),
+      h('div', { class: 'recipe-name' },
+        h('div', { class: 'label-row' }, h('span', { class: 'label', text: 'Recipe' }), rename), title, coffee),
       h('div', { class: 'recipe-shape' }, curveBox, blurb)),
     h('div', { class: 'stepper-grid' }, steppers.map((s) => s.el)),
     h('div', { class: 'ratio-line muted' }, h('span', { text: 'Ratio' }), ratioEl, h('span', { 'aria-hidden': 'true', text: '·' }), stopNote, saving),
@@ -53,6 +56,11 @@ export function createHome() {
   const demoBtn = h('button', { class: 'btn btn-inverse-outline', type: 'button', onClick: () => transport().press('espresso'), text: 'Demo: press the machine button' });
   const next = h('section', { class: 'next', 'aria-label': 'Next step' },
     h('span', { class: 'label', text: 'Next step' }), nextTitle, startBtn, stopBtn, scanBtn, nextSub, demoBtn);
+
+  // Shown when Decaid's gateway mode would get in the way of Mise.
+  const modeTitle = h('strong');
+  const modeText = h('span');
+  const modeBanner = h('button', { class: 'clean-banner', type: 'button', onClick: () => go('settings') }, modeTitle, modeText);
 
   // Cleaning reminder
   const cleanText = h('span');
@@ -76,13 +84,13 @@ export function createHome() {
 
   const el = h('div', { class: 'view view-home' },
     head.el,
-    h('div', { class: 'home-body' }, recipe, h('div', { class: 'home-side' }, next, clean, last)));
+    h('div', { class: 'home-body' }, recipe, h('div', { class: 'home-side' }, next, modeBanner, clean, last)));
 
   function updateFavorites() {
     const ids = favoriteIds();
     const all = visibleProfiles();
     const current = S.workflow?.profile?.title || '';
-    const key = `${ids.join(',')}|${current}|${all.length}`;
+    const key = `${ids.join(',')}|${current}|${all.length}|${Object.values(S.names).join(',')}`;
     if (key === favKey) return;
     favKey = key;
     const records = ids.map((id) => all.find((r) => r.id === id)).filter(Boolean);
@@ -92,7 +100,7 @@ export function createHome() {
     }
     replaceKids(favRow, records.map((record) => h('button', {
       class: 'fav', type: 'button', 'aria-pressed': isInUse(record) ? 'true' : 'false',
-      onClick: () => useProfile(record), text: record.profile.title,
+      onClick: () => useProfile(record), text: nameOf(record),
     })));
   }
 
@@ -146,7 +154,10 @@ export function createHome() {
     head.update();
     const st = status();
     const profile = S.workflow?.profile;
-    setText(title, profile?.title || 'No recipe loaded');
+    setText(title, displayTitle(profile?.title) || 'No recipe loaded');
+    const current = profile ? visibleProfiles().find((r) => r.profile.title === profile.title) : null;
+    show(rename, Boolean(current));
+    rename.onclick = current ? () => openRename(current) : null;
     const context = S.workflow?.context || {};
     setText(coffee, [context.coffeeName, context.coffeeRoaster].filter(Boolean).join(' · '));
     if (profile !== curveFor) {
@@ -157,9 +168,18 @@ export function createHome() {
     for (const s of steppers) s.update();
     const out = values.out();
     setText(ratioEl, ratio(values.dose(), out));
-    setText(stopNote, out > 0
-      ? (S.scaleConnected ? `Stops by itself when the scale reads ${num(out, 0)} g` : 'Connect a scale to stop by weight')
-      : 'Stop by weight is off');
+    const mode = gatewayMode();
+    setText(stopNote, out <= 0 ? 'Stop by weight is off'
+      : mode === 'full' ? 'Gateway mode is Full, so stop the shot yourself'
+        : S.scaleConnected ? `Stops by itself when the scale reads ${num(out, 0)} g` : 'Connect a scale to stop by weight');
+    show(modeBanner, mode === 'full' || mode === 'disabled');
+    if (mode === 'disabled') {
+      setText(modeTitle, 'Decaid will show its own shot screen');
+      setText(modeText, 'Gateway mode is Disabled. Tap to switch it to Tracking.');
+    } else if (mode === 'full') {
+      setText(modeTitle, 'Shots will not stop by weight');
+      setText(modeText, 'Gateway mode is Full. Tap to switch it to Tracking.');
+    }
     setText(saving, { saving: 'Saving…', saved: 'Saved', error: 'Not saved' }[S.saving] || '');
     setAttr(saving, 'data-state', S.saving || null);
     updateFavorites();

@@ -2,7 +2,7 @@
 // machine starts brewing, whichever button started it.
 
 import { h, setText, setAttr, show, replaceKids } from '../dom.js';
-import { S, requestState } from '../store.js';
+import { S, requestState, displayTitle, gatewayMode } from '../store.js';
 import { num, cap } from '../format.js';
 import { createChart } from '../chart.js';
 
@@ -78,7 +78,7 @@ export function createBrewing() {
     setText(title, shot.phase === 'prep' ? 'Getting ready'
       : shot.phase === 'ending' ? 'Finishing'
         : sub0 === 'preinfusion' ? 'Soaking the coffee' : 'Pouring');
-    const bits = [S.workflow?.profile?.title];
+    const bits = [displayTitle(S.workflow?.profile?.title)];
     if (context.targetDoseWeight) bits.push(`${num(context.targetDoseWeight, 1)} g in`);
     if (target > 0) bits.push(`aiming for ${num(target, 0)} g out`);
     setText(sub, bits.filter(Boolean).join(' · '));
@@ -96,6 +96,7 @@ export function createBrewing() {
     setText(time, String(Math.floor(shot.seconds)));
     setText(cup, hasScale ? num(grams, 1) : '–');
     setText(cupOf, hasScale && target > 0 ? `of ${num(target, 0)} g` : (hasScale ? 'g' : ''));
+    const full = gatewayMode() === 'full';
     const usable = hasScale && target > 0;
     show(progress, usable);
     if (usable) {
@@ -103,7 +104,8 @@ export function createBrewing() {
       setAttr(progress, 'aria-valuemax', target);
       setAttr(progress, 'aria-valuenow', num(grams, 1));
       const left = Math.max(0, target - grams);
-      setText(cupNote, left > 0.05 ? `${num(left, 1)} g to go. Stops by itself.` : 'Target reached.');
+      setText(cupNote, full ? `${num(left, 1)} g to go. Stop it yourself (gateway mode is Full).`
+        : left > 0.05 ? `${num(left, 1)} g to go. Stops by itself.` : 'Target reached.');
     } else {
       setText(cupNote, hasScale ? 'No target weight set. Stop the shot yourself.' : 'No scale connected. Stop the shot yourself.');
     }

@@ -7,12 +7,30 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.1.1.zip`.
+   **Install skin → ZIP file** and pick `mise-0.2.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
 the Settings button in a skin opens) is refused with a 401 error when it tries
 to switch or install skins.
+
+## Set Decaid's gateway mode to Tracking
+
+Mise expects Decaid's gateway mode to be **Tracking**: Decaid then weighs the
+shot, stops it at the target and saves it, while Mise shows it. You can set it
+in Mise under Settings > Shots. In **Disabled** mode Decaid shows its own shot
+screen in place of Mise's; in **Full** mode nothing stops the shot at the
+target weight, because Mise does not do that itself.
+
+## Settings and recipe names
+
+Settings has Mise's own page for the everyday choices (gateway mode, scale
+rules, steam, auto-sleep, brightness). "All Decaid settings" opens Decaid's
+complete settings page for the rest.
+
+The pencil on a recipe renames it. Recipes you made are renamed in Decaid
+itself. Decaid's built-in recipes cannot be changed, so for those the new name
+is kept by Mise (key-value store, `mise/names`) and shown only in Mise.
 
 ## Leaving the skin
 
@@ -64,17 +82,3 @@ To point the skin at Decaid on another device while developing, add
     fonts/               Inter and Space Grotesk (SIL Open Font License)
 
 There is no build step: the files in this folder are what runs.
-
-## Developing
-
-    npm install        # only needed for the mock gateway
-    npm run gateway    # a pretend Decaid on port 8080
-    npm run serve      # the skin on http://localhost:24800
-    npm run package    # builds mise-<version>.zip for a release
-
-`tools/smoke_test.py` drives the skin in headless Chrome against the mock
-gateway (needs Python with Playwright) and saves screenshots to `shots/`.
-
-To publish a version, bump it in `skin-manifest.json`, `package.json` and
-`src/main.js`, run `npm run package`, and attach the ZIP to a GitHub release.
-Decaid installs a skin from a release by downloading its first `.zip` asset.
