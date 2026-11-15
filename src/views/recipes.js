@@ -1,14 +1,19 @@
-// Recipes: every profile on the machine, described in plain words. Tap one to
-// see it in full and load it; star up to five to keep them on the Brew screen.
+// Recipes: every recipe on the machine plus your copies. Search, filter,
+// sort; tap one to see it in full. In Starred, arrows set the order of the
+// Brew screen's carousel.
 
-import { h, setAttr, replaceKids, icon } from '../dom.js';
-import { S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, openRename } from '../store.js';
-import { firstSentence } from '../format.js';
+import { h, setAttr, replaceKids, icon, setText } from '../dom.js';
+import {
+  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite,
+} from '../store.js';
+import { firstSentence, deg, num } from '../format.js';
 import { profileCurve } from '../chart.js';
+import { sheetHead } from './parts.js';
 
-const FILTERS = ['All', 'Starred', 'Espresso', 'Filter and tea', 'Cleaning'];
+const FILTERS = ['All', 'Starred', 'Your copies', 'Espresso', 'Filter and tea', 'Cleaning'];
+const SORTS = [{ key: 'name', label: 'A–Z' }, { key: 'recent', label: 'Recently brewed' }];
 
-function kind(profile) {
+export function kind(profile) {
   const type = String(profile.beverage_type || 'espresso').toLowerCase();
   const title = String(profile.title || '').toLowerCase();
   if (type === 'cleaning' || type === 'calibrate' || /clean|descale|flush/.test(title)) return 'Cleaning';
@@ -18,60 +23,79 @@ function kind(profile) {
 
 export function createRecipes() {
   let filter = 'All';
+  let sort = 'name';
   let query = '';
   let key = '';
 
-  const search = h('input', { id: 'recipe-search', class: 'input input-search', type: 'search', autocomplete: 'off', placeholder: 'Name or description' });
+  const search = h('input', { class: 'input input-search', type: 'search', autocomplete: 'off', placeholder: 'Search recipes', 'aria-label': 'Search recipes' });
   search.addEventListener('input', () => { query = search.value.trim().toLowerCase(); update(); });
-  const chips = FILTERS.map((name) => h('button', {
-    class: 'filter', type: 'button', text: name, onClick: () => { filter = name; update(); },
-  }));
+  const head = sheetHead({ title: 'Recipes', right: [search] });
+  const chips = FILTERS.map((name) => h('button', { class: 'filter', type: 'button', text: name, onClick: () => { filter = name; update(); } }));
+  const sorts = SORTS.map((s) => h('button', { class: 'filter filter-quiet', type: 'button', text: s.label, onClick: () => { sort = s.key; update(); } }));
   const grid = h('div', { class: 'recipe-grid' });
-  const count = h('span', { class: 'page-sub' });
+  const tip = h('p', { class: 'muted small grid-tip' });
 
-  const el = h('div', { class: 'view view-recipes' },
-    h('header', { class: 'page-head' },
-      h('div', { class: 'page-head-text' }, h('h1', { class: 'page-title', text: 'Recipes' }), count),
-      h('div', { class: 'search' }, h('label', { class: 'label', for: 'recipe-search', text: 'Search' }), search)),
-    h('div', { class: 'filters', role: 'group', 'aria-label': 'Filter recipes' }, chips),
-    grid);
+  const el = h('div', { class: 'sheet-body view-recipes' },
+    head.el,
+    h('div', { class: 'filters' }, h('div', { class: 'filter-group', role: 'group', 'aria-label': 'Filter' }, chips),
+      h('div', { class: 'filter-group', role: 'group', 'aria-label': 'Sort' }, sorts)),
+    tip, grid);
+
+  function lastBrewed() {
+    const map = {};
+    for (const shot of S.shots || []) {
+      const t = shot.workflow?.profile?.title;
+      const ts = Date.parse(shot.timestamp);
+      if (t && Number.isFinite(ts) && !(map[t] > ts)) map[t] = ts;
+    }
+    return map;
+  }
 
   function update() {
-    chips.forEach((chip, i) => setAttr(chip, 'aria-pressed', FILTERS[i] === filter ? 'true' : 'false'));
+    chips.forEach((c, i) => setAttr(c, 'aria-pressed', FILTERS[i] === filter ? 'true' : 'false'));
+    sorts.forEach((c, i) => setAttr(c, 'aria-pressed', SORTS[i].key === sort ? 'true' : 'false'));
     const all = visibleProfiles();
     const favs = favoriteIds();
     const current = S.workflow?.profile?.title || '';
-    const titles = all.map((r) => nameOf(r)).join('\u0001');
-    const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${query}|${titles}`;
+    const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${sort}|${query}|${all.map(nameOf).join('\u0001')}|${(S.shots || []).length}|${S.layout.unit}`;
     if (next === key) return;
     key = next;
-    count.textContent = 'Tap a recipe to see it in full and load it. Star up to five for the Brew screen.';
+    setText(head.subEl, S.profiles ? `${all.length} recipes · ${favs.length} of 5 starred for the Brew screen` : '');
+    setText(tip, filter === 'Starred' ? 'Use the arrows to set the order they appear on the Brew screen.' : 'Tap a recipe to see it in full and load it. The star keeps it on the Brew screen.');
 
-    if (!S.profiles) {
-      replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]);
-      return;
-    }
-    const shown = all.filter((record) => {
+    if (!S.profiles) { replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]); return; }
+    const recent = lastBrewed();
+    let shown = all.filter((record) => {
       const p = record.profile;
       if (filter === 'Starred' && !favs.includes(record.id)) return false;
-      if (filter !== 'All' && filter !== 'Starred' && kind(p) !== filter) return false;
+      if (filter === 'Your copies' && !record.copy) return false;
+      if (['Espresso', 'Filter and tea', 'Cleaning'].includes(filter) && kind(p) !== filter) return false;
       if (query && !`${nameOf(record)} ${p.title} ${p.notes || ''} ${p.author || ''}`.toLowerCase().includes(query)) return false;
       return true;
-    }).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    });
+    if (filter === 'Starred') shown.sort((a, b) => favs.indexOf(a.id) - favs.indexOf(b.id));
+    else if (sort === 'recent') shown.sort((a, b) => (recent[b.profile.title] || 0) - (recent[a.profile.title] || 0) || nameOf(a).localeCompare(nameOf(b)));
+    else shown.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
     if (!shown.length) {
-      replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'No starred recipes yet. Tap a star to add one.' : 'No recipes match.' })]);
+      replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'Nothing starred yet. Tap a star to add a recipe to the Brew screen.' : filter === 'Your copies' ? 'No copies yet. Duplicate a recipe to make one you can tune.' : 'No recipes match.' })]);
       return;
     }
-    replaceKids(grid, shown.map((record) => {
+    replaceKids(grid, shown.map((record, i) => {
       const p = record.profile;
       const starred = favs.includes(record.id);
       const inUse = isInUse(record);
+      const t = Number(p.steps?.[0]?.temperature);
+      const out = record.copy && record.out != null ? Number(record.out) : Number(p.target_weight) || 0;
+      const order = filter === 'Starred' ? h('div', { class: 'order' },
+        h('button', { class: 'icon-btn icon-btn-small', type: 'button', 'aria-label': `Move ${nameOf(record)} earlier`, disabled: i === 0, onClick: () => moveFavorite(record.id, -1) }, icon('back')),
+        h('button', { class: 'icon-btn icon-btn-small', type: 'button', 'aria-label': `Move ${nameOf(record)} later`, disabled: i === shown.length - 1, onClick: () => moveFavorite(record.id, 1) }, icon('chevron'))) : null;
       return h('article', { class: 'recipe', 'data-in-use': inUse ? 'true' : null },
         h('button', { class: 'recipe-main', type: 'button', onClick: () => openRecipe(record.id) },
-          profileCurve(p),
+          profileCurve(p, 'curve recipe-curve'),
           h('span', { class: 'recipe-card-title', text: nameOf(record) }),
-          h('span', { class: 'recipe-card-text muted', text: firstSentence(p.notes, 120) || 'No description.' }),
+          h('span', { class: 'recipe-card-meta', text: [Number.isFinite(t) ? deg(t, 1) : null, out > 0 ? `${num(out, 0)} g` : null].filter(Boolean).join(' · ') }),
+          h('span', { class: 'recipe-card-text', text: firstSentence(p.notes, 100) || 'No description.' }),
           h('span', { class: 'tags' },
             inUse ? h('span', { class: 'pill pill-solid', text: 'In use' }) : null,
             record.copy ? h('span', { class: 'pill', text: 'Your copy' }) : null,
@@ -81,10 +105,7 @@ export function createRecipes() {
           'aria-label': `${starred ? 'Remove star from' : 'Star'} ${nameOf(record)}`,
           onClick: () => toggleFavorite(record.id),
         }, icon('star', 'icon icon-star')),
-        h('button', {
-          class: 'star star-edit', type: 'button', 'aria-label': `Rename or duplicate ${nameOf(record)}`,
-          onClick: () => openRename(record),
-        }, icon('pencil')));
+        order);
     }));
   }
 

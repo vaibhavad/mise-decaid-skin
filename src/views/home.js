@@ -1,200 +1,363 @@
-// Home: the current recipe, the four numbers people change, and what to do next.
+// Brew: everything on one screen. Water tank on the left, the small jobs
+// (hot water, steam, flush, scale) beside it, and in the middle your recipes
+// on a carousel with the four numbers you change most. Swipe to load a
+// recipe; tap the one in the middle to see it in full; tap any number to
+// change it.
 
-import { h, setText, setAttr, show, replaceKids } from '../dom.js';
+import { h, setText, setAttr, show, replaceKids, icon } from '../dom.js';
 import {
-  S, status, values, setDose, setOut, setTemp, setGrind, go, requestState, scan, transport,
-  visibleProfiles, favoriteIds, useProfile, isInUse, cleaningDue, shotsSinceClean, selectShot,
-  displayTitle, nameOf, openRename, openDuplicate, openRecipe, copyInUse, gatewayMode,
+  S, status, values, go, requestState, transport, tare, scan, toast, useProfile, carouselRecords, nameOf,
+  openRecipe, cleaningDue, shotsSinceClean, markCleaned, selectShot, gatewayMode, waterLabel, setSteam,
 } from '../store.js';
-import { num, trimNum, ratio, firstSentence, when } from '../format.js';
+import { num, trimNum, ratio, when, deg } from '../format.js';
 import { profileCurve, miniChart } from '../chart.js';
-import { stepper, header, card } from './parts.js';
+import { edit } from './edits.js';
+
+const LABELS = { hotWater: 'Hot water', steam: 'Steam', flush: 'Flush', scale: 'Scale' };
+const ICONS = { hotWater: 'water', steam: 'steam', flush: 'flush', scale: 'scale' };
+
+// A number you can tap to change.
+function value(label, onTap, { big = false } = {}) {
+  const v = h('span', { class: 'val-num' });
+  const u = h('span', { class: 'val-unit' });
+  const sub = h('span', { class: 'val-sub' });
+  const el = h('button', { class: big ? 'val val-big' : 'val', type: 'button', onClick: onTap },
+    h('span', { class: 'val-label' }, label, icon('chevron', 'icon val-chev')),
+    h('span', { class: 'val-read' }, v, u), sub);
+  return {
+    el,
+    set(num0, unit = '', subText = '') { setText(v, num0); setText(u, unit); setText(sub, subText); show(sub, Boolean(subText)); },
+  };
+}
 
 export function createHome() {
-  const head = header();
+  // ── Water tank ──
+  const tankFill = h('span', { class: 'tank-bar-fill' });
+  const tankText = h('span', { class: 'tank-bar-text' });
+  const tankWord = h('span', { class: 'tank-bar-word' });
+  const tank = h('button', {
+    class: 'tank-bar', type: 'button',
+    onClick: () => {
+      const w = waterLabel();
+      toast(w.level ? `Water tank: ${w.text}, ${w.word.toLowerCase()}. A full tank holds about 2 litres.` : 'Water level not known yet.');
+    },
+  }, tankFill, tankWord, tankText);
 
-  // Recipe card
-  const title = h('h2', { class: 'recipe-title' });
-  const rename = h('button', { class: 'link link-inline', type: 'button', text: 'Rename' });
-  const dup = h('button', { class: 'link link-inline', type: 'button', text: 'Duplicate' });
-  const details = h('button', { class: 'link link-inline', type: 'button', text: 'Details' });
-  const copyTag = h('span', { class: 'pill pill-quiet', text: 'Your copy' });
-  const coffee = h('span', { class: 'muted' });
-  const curveBox = h('div', { class: 'recipe-curve' });
-  const blurb = h('span', { class: 'recipe-blurb muted' });
-  let curveFor = null;
+  // ── Utility cards ──
+  const startBtn = (state, noun) => h('button', { class: 'mini-btn', type: 'button', onClick: () => requestState(state), text: 'Start', 'aria-label': `Start ${noun}` });
 
-  const steppers = [
-    stepper({ label: 'Coffee in', unit: 'g', less: 'Less coffee', more: 'More coffee', read: values.dose, write: setDose, step: 0.1, format: (v) => num(v, 1) }),
-    stepper({ label: 'Espresso out', unit: 'g', less: 'Less espresso', more: 'More espresso', read: values.out, write: setOut, step: 1, format: (v) => (v > 0 ? num(v, 0) : 'Off') }),
-    stepper({ label: 'Temperature', unit: '°C', less: 'Cooler', more: 'Hotter', read: () => values.temp() ?? '', write: setTemp, step: 0.5, format: (v) => trimNum(v) }),
-    stepper({ label: 'Grinder setting', less: 'Lower grinder setting', more: 'Higher grinder setting', read: values.grind, write: setGrind, step: 0.1, format: (v) => trimNum(v) }),
-  ];
+  const hwVol = value('Amount', edit.waterVolume);
+  const hwTemp = value('Temperature', edit.waterTemp);
+  const hwStart = startBtn('hotWater', 'hot water');
 
-  const ratioEl = h('strong');
-  const stopNote = h('span');
-  const saving = h('span', { class: 'saving' });
-  const favRow = h('div', { class: 'fav-row' });
-  let favKey = '';
+  const stTemp = value('Temperature', edit.steamTemp);
+  const stTime = value('Stops after', edit.steamTime);
+  const stStart = startBtn('steam', 'steam');
+  let lastSteam = 150;
+  const stSwitch = h('button', {
+    class: 'switch switch-small', type: 'button', role: 'switch', 'aria-label': 'Steam heater',
+    onClick: () => {
+      const on = Number(S.workflow?.steamSettings?.targetTemperature) > 0;
+      setSteam({ targetTemperature: on ? 0 : lastSteam });
+    },
+  }, h('span', { class: 'switch-knob', 'aria-hidden': 'true' }));
 
-  const recipe = card('recipe-card',
-    h('div', { class: 'recipe-top' },
-      h('div', { class: 'recipe-name' },
-        h('div', { class: 'label-row' }, h('span', { class: 'label', text: 'Recipe' }), details, rename, dup, copyTag), title, coffee),
-      h('div', { class: 'recipe-shape' }, curveBox, blurb)),
-    h('div', { class: 'stepper-grid' }, steppers.map((s) => s.el)),
-    h('div', { class: 'ratio-line muted' }, h('span', { text: 'Ratio' }), ratioEl, h('span', { 'aria-hidden': 'true', text: '·' }), stopNote, saving),
-    h('div', { class: 'favs' },
-      h('div', { class: 'favs-head' },
-        h('span', { class: 'label', text: 'Your recipes' }),
-        h('button', { class: 'link', type: 'button', onClick: () => go('recipes'), text: 'All recipes' })),
-      favRow));
-
-  // Next step
-  const nextTitle = h('p', { class: 'next-title' });
-  const nextSub = h('p', { class: 'next-sub' });
-  const startBtn = h('button', { class: 'btn btn-inverse btn-big', type: 'button', onClick: () => requestState('espresso'), text: 'Start espresso' });
-  const stopBtn = h('button', { class: 'btn btn-inverse btn-big', type: 'button', onClick: () => requestState('idle'), text: 'Stop' });
-  const scanBtn = h('button', { class: 'btn btn-inverse btn-big', type: 'button', onClick: scan, text: 'Look again' });
-  const demoBtn = h('button', { class: 'btn btn-inverse-outline', type: 'button', onClick: () => transport().press('espresso'), text: 'Demo: press the machine button' });
-  const next = h('section', { class: 'next', 'aria-label': 'Next step' },
-    h('span', { class: 'label', text: 'Next step' }), nextTitle, startBtn, stopBtn, scanBtn, nextSub, demoBtn);
-
-  // Shown when Decaid's gateway mode would get in the way of Mise.
-  const modeTitle = h('strong');
-  const modeText = h('span');
-  const modeBanner = h('button', { class: 'clean-banner', type: 'button', onClick: () => go('settings') }, modeTitle, modeText);
-
-  // Cleaning reminder
+  const flTime = value('Runs for', edit.flushTime);
+  const flStart = startBtn('flush', 'flush');
   const cleanText = h('span');
-  const clean = h('button', { class: 'clean-banner', type: 'button', onClick: () => go('water') },
-    h('strong', { text: 'Time to clean the group' }), cleanText);
+  const cleanBtn = h('button', { class: 'mini-btn', type: 'button', text: 'Cleaned', onClick: markCleaned, 'aria-label': 'I have cleaned the group' });
+  const clean = h('div', { class: 'clean-note' }, cleanText, cleanBtn);
 
-  // Last shot
-  const lastWhen = h('span', { class: 'label' });
-  const lastTag = h('span', { class: 'pill' });
-  const lastOut = h('span', { class: 'last-out' });
-  const lastTime = h('span', { class: 'muted' });
-  const lastNote = h('p', { class: 'muted last-note' });
-  const mini = miniChart();
-  const lastOpen = h('button', { class: 'link', type: 'button', text: 'Open in History' });
-  const lastBody = h('div', { class: 'last-body' },
-    h('div', { class: 'last-head' }, lastWhen, lastTag),
-    h('div', { class: 'last-figures' }, lastOut, lastTime),
-    mini.el, lastNote, lastOpen);
-  const lastEmpty = h('p', { class: 'muted', text: 'Your shots will appear here once you have pulled one.' });
-  const last = card('last-card', lastBody, lastEmpty);
+  const scWeight = h('span', { class: 'val-num' });
+  const scUnit = h('span', { class: 'val-unit' });
+  const scHint = h('span', { class: 'val-label' });
+  const scRead = h('button', { class: 'val val-big', type: 'button', onClick: tare }, scHint, h('span', { class: 'val-read' }, scWeight, scUnit));
+  const scSearch = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Search', onClick: scan });
+  const scOff = h('div', { class: 'scale-off' }, h('span', { class: 'muted', text: 'Not connected' }), scSearch);
 
-  const el = h('div', { class: 'view view-home' },
-    head.el,
-    h('div', { class: 'home-body' }, recipe, h('div', { class: 'home-side' }, next, modeBanner, clean, last)));
+  const cardHead = (key, ...right) => h('div', { class: 'u-head' },
+    h('span', { class: 'u-title' }, icon(ICONS[key], 'icon u-icon'), LABELS[key]), h('span', { class: 'u-right' }, right));
+  const cards = {
+    hotWater: h('section', { class: 'u-card', 'data-card': 'hotWater' }, cardHead('hotWater', hwStart), h('div', { class: 'u-vals' }, hwVol.el, hwTemp.el)),
+    steam: h('section', { class: 'u-card', 'data-card': 'steam' }, cardHead('steam', stStart, stSwitch), h('div', { class: 'u-vals' }, stTemp.el, stTime.el)),
+    flush: h('section', { class: 'u-card', 'data-card': 'flush' }, cardHead('flush', flStart), h('div', { class: 'u-vals' }, flTime.el), clean),
+    scale: h('section', { class: 'u-card', 'data-card': 'scale' }, cardHead('scale'), scRead, scOff),
+  };
+  const utilCol = h('div', { class: 'u-col' });
+  let cardKey = '';
 
-  function updateFavorites() {
-    const ids = favoriteIds();
-    const all = visibleProfiles();
-    const current = S.workflow?.profile?.title || '';
-    const key = `${ids.join(',')}|${current}|${all.length}|${Object.values(S.names).join(',')}`;
-    if (key === favKey) return;
-    favKey = key;
-    const records = ids.map((id) => all.find((r) => r.id === id)).filter(Boolean);
-    if (!records.length) {
-      replaceKids(favRow, [h('span', { class: 'muted', text: 'Star recipes in All recipes to keep them here.' })]);
-      return;
-    }
-    replaceKids(favRow, records.map((record) => h('button', {
-      class: 'fav', type: 'button', 'aria-pressed': isInUse(record) ? 'true' : 'false',
-      onClick: () => useProfile(record), text: nameOf(record),
-    })));
+  // ── Recipe carousel ──
+  const track = h('div', { class: 'carousel', 'aria-roledescription': 'carousel', 'aria-label': 'Your recipes' });
+  const dots = h('div', { class: 'dots', 'aria-hidden': 'true' });
+  const allLink = h('button', { class: 'link', type: 'button', onClick: () => go('recipes') }, 'All recipes', icon('chevron', 'icon link-chev'));
+  const prevBtn = h('button', { class: 'nav-arrow', type: 'button', 'aria-label': 'Previous recipe', onClick: () => step(-1) }, icon('back'));
+  const nextBtn = h('button', { class: 'nav-arrow', type: 'button', 'aria-label': 'Next recipe', onClick: () => step(1) }, icon('chevron'));
+  const emptyCarousel = h('div', { class: 'carousel-empty' },
+    h('p', { class: 'muted', text: 'No recipe loaded yet.' }),
+    h('button', { class: 'btn btn-primary', type: 'button', text: 'Choose a recipe', onClick: () => go('recipes') }));
+
+  let records = [];
+  let idx = 0;
+  let cardEls = [];
+  let listKey = '';
+  let pending = null;   // a load waiting for the swiping to stop
+  let pendingTimer = null;
+
+  function buildCards() {
+    cardEls = records.map((record, i) => {
+      const copy = record.copy ? h('span', { class: 'pill pill-quiet', text: 'Your copy' }) : null;
+      return h('button', {
+        class: 'r-card', type: 'button', 'data-i': i,
+        'aria-label': nameOf(record),
+      },
+      h('span', { class: 'r-top' }, h('span', { class: 'r-name', text: nameOf(record) }), copy),
+      profileCurve(record.profile, 'curve r-curve'),
+      h('span', { class: 'r-meta' }, metaLine(record)));
+    });
+    replaceKids(track, cardEls);
+    replaceKids(dots, records.map(() => h('span', { class: 'dot-i' })));
   }
 
-  function updateNext(st) {
+  function metaLine(record) {
+    const p = record.profile;
+    const out = record.copy && record.out != null ? Number(record.out) : Number(p.target_weight) || 0;
+    const t = Number(p.steps?.[0]?.temperature);
+    return [Number.isFinite(t) ? deg(t, 1) : null, out > 0 ? `${num(out, 0)} g out` : null, `${p.steps?.length || 0} steps`].filter(Boolean).join(' · ');
+  }
+
+  function place(dx = 0) {
+    const w = track.clientWidth || 600;
+    cardEls.forEach((card, i) => {
+      const d = i - idx + dx / (w * 0.42);
+      const ad = Math.abs(d);
+      const x = d * w * 0.42;
+      const scale = 1 - Math.min(ad, 1.5) * 0.16;
+      card.style.transform = `translateX(calc(-50% + ${x.toFixed(1)}px)) scale(${scale.toFixed(3)})`;
+      card.style.opacity = String(Math.max(0, 1 - ad * 0.5).toFixed(2));
+      card.style.zIndex = String(10 - Math.round(ad * 2));
+      setAttr(card, 'data-centre', Math.round(ad * 10) === 0 ? 'true' : null);
+      setAttr(card, 'tabindex', ad < 0.5 ? '0' : '-1');
+    });
+    [...dots.children].forEach((dot, i) => setAttr(dot, 'data-on', i === idx ? 'true' : null));
+    setAttr(prevBtn, 'disabled', idx <= 0);
+    setAttr(nextBtn, 'disabled', idx >= records.length - 1);
+  }
+
+  function step(by) {
+    const next = Math.max(0, Math.min(records.length - 1, idx + by));
+    if (next === idx) { place(); return; }
+    idx = next;
+    place();
+    pending = records[idx];
+    clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(() => {
+      const record = pending;
+      pending = null;
+      if (record) useProfile(record, `Loaded ${nameOf(record)}`);
+    }, 450);
+  }
+
+  let drag = null;
+  track.addEventListener('pointerdown', (e) => {
+    if (!records.length) return;
+    drag = { x: e.clientX, dx: 0, id: e.pointerId, moved: false };
+  });
+  track.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    drag.dx = e.clientX - drag.x;
+    if (Math.abs(drag.dx) > 8 && !drag.moved) {
+      drag.moved = true;
+      track.setPointerCapture(drag.id);
+      track.classList.add('dragging');
+    }
+    if (drag.moved) place(drag.dx);
+  });
+  const endDrag = (e) => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    track.classList.remove('dragging');
+    if (d.moved) {
+      const w = track.clientWidth || 600;
+      const by = Math.round(-d.dx / (w * 0.42)) || (Math.abs(d.dx) > 50 ? -Math.sign(d.dx) : 0);
+      if (by) step(by); else place();
+      return;
+    }
+    const card = e.target.closest?.('.r-card');
+    if (!card) return;
+    const i = Number(card.dataset.i);
+    if (i === idx) openRecipe(records[i].id); else step(i - idx);
+  };
+  track.addEventListener('pointerup', endDrag);
+  track.addEventListener('pointercancel', () => { drag = null; track.classList.remove('dragging'); place(); });
+  track.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') step(-1);
+    if (e.key === 'ArrowRight') step(1);
+    if (e.key === 'Enter' && records[idx]) openRecipe(records[idx].id);
+  });
+  window.addEventListener('resize', () => place());
+
+  // ── The four numbers ──
+  const vTemp = value('Temperature', edit.temp, { big: true });
+  const vGrind = value('Grind', edit.grind, { big: true });
+  const vDose = value('Coffee in', edit.dose, { big: true });
+  const vOut = value('Espresso out', edit.out, { big: true });
+  const saving = h('span', { class: 'saving' });
+
+  // ── Next step ──
+  const nextText = h('span', { class: 'next-text' });
+  const startShot = h('button', { class: 'btn btn-primary btn-start', type: 'button', text: 'Start espresso', onClick: () => requestState('espresso') });
+  const demoPress = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Demo: press the machine button', onClick: () => transport().press('espresso') });
+  const warnText = h('span');
+  const warn = h('button', { class: 'warn-line', type: 'button', onClick: () => go('settings') }, warnText, icon('chevron', 'icon link-chev'));
+
+  const stage = h('section', { class: 'stage-card' },
+    h('div', { class: 'carousel-wrap' }, prevBtn, track, emptyCarousel, nextBtn),
+    h('div', { class: 'carousel-foot' }, dots, allLink),
+    h('div', { class: 'vals-row' }, vTemp.el, vGrind.el, vDose.el, vOut.el),
+    h('div', { class: 'next-row' }, h('span', { class: 'next-dot', 'aria-hidden': 'true' }), nextText, saving, startShot, demoPress),
+    warn);
+
+  // ── Last shot ──
+  const lastWhen = h('span', { class: 'val-label' });
+  const lastOut = h('span', { class: 'last-out' });
+  const lastTaste = h('span', { class: 'pill pill-quiet' });
+  const mini = miniChart();
+  const last = h('button', { class: 'last-strip', type: 'button' },
+    h('span', { class: 'last-text' }, lastWhen, lastOut), mini.el, lastTaste, icon('chevron', 'icon link-chev'));
+
+  const el = h('div', { class: 'view view-home' },
+    tank, utilCol,
+    h('div', { class: 'home-main' }, stage, last));
+
+  function updateCards() {
+    const shown = S.layout.cards.filter((c) => !S.layout.hidden.includes(c));
+    const key = shown.join(',');
+    if (key !== cardKey) {
+      cardKey = key;
+      replaceKids(utilCol, shown.map((c) => cards[c]));
+    }
+    show(utilCol, shown.length > 0);
+    show(tank, S.layout.tank !== false);
+    setAttr(el, 'data-cols', `${S.layout.tank !== false ? 't' : ''}${shown.length ? 'u' : ''}`);
+
+    const st = S.snap?.state?.state;
+    const canStart = S.info?.GHC === false && st === 'idle';
+    show(hwStart, canStart);
+    show(stStart, canStart && Number(S.workflow?.steamSettings?.targetTemperature) > 0);
+    show(flStart, canStart);
+
+    const hw = S.workflow?.hotWaterData || {};
+    hwVol.set(hw.volume != null ? num(hw.volume, 0) : '–', 'ml');
+    hwTemp.set(hw.targetTemperature != null ? deg(hw.targetTemperature) : '–');
+
+    const steam = S.workflow?.steamSettings || {};
+    const on = Number(steam.targetTemperature) > 0;
+    if (on) lastSteam = Number(steam.targetTemperature);
+    setAttr(stSwitch, 'aria-checked', on ? 'true' : 'false');
+    setAttr(cards.steam, 'data-off', !on);
+    stTemp.set(on ? deg(steam.targetTemperature) : 'Off');
+    stTime.set(steam.duration != null ? num(steam.duration, 0) : '–', 's');
+
+    const rinse = S.workflow?.rinseData || {};
+    flTime.set(rinse.duration != null ? num(rinse.duration, 0) : '–', 's');
+    const since = shotsSinceClean();
+    const due = cleaningDue();
+    setAttr(clean, 'data-due', due);
+    setText(cleanText, since == null ? 'Cleaning count starts with your next shot'
+      : due ? `Clean the group · ${since} shots` : `${since} ${since === 1 ? 'shot' : 'shots'} since cleaning`);
+    show(cleanBtn, due);
+
+    const scaleOn = S.scaleConnected && S.scale.weight != null;
+    show(scRead, scaleOn);
+    show(scOff, !scaleOn);
+    setText(scHint, 'Tap to zero');
+    setText(scWeight, scaleOn ? num(S.scale.weight, 1) : '–');
+    setText(scUnit, 'g');
+
+    const w = waterLabel();
+    setAttr(tank, 'data-level', w.level);
+    tankFill.style.height = `${Math.round(w.pct * 100)}%`;
+    setText(tankText, w.text);
+    setText(tankWord, w.level ? w.word : '');
+    setAttr(tank, 'aria-label', w.level ? `Water tank ${w.text}, ${w.word}` : 'Water tank');
+  }
+
+  function updateCarousel() {
+    const list = carouselRecords();
+    const key = list.map((r) => `${r.id}:${nameOf(r)}:${r.profile.steps?.length}:${r.out}`).join('|');
+    if (key !== listKey) {
+      listKey = key;
+      records = list;
+      buildCards();
+    }
+    show(emptyCarousel, !records.length);
+    show(prevBtn, records.length > 1);
+    show(nextBtn, records.length > 1);
+    if (!pending && !drag) {
+      const title = S.workflow?.profile?.title;
+      const i = records.findIndex((r) => r.profile.title === title);
+      if (i >= 0) idx = i;
+      idx = Math.max(0, Math.min(idx, records.length - 1));
+    }
+    if (!drag) place();
+  }
+
+  function updateValues() {
+    const t = values.temp();
+    vTemp.set(t != null ? deg(t, 1) : '–');
+    const g = values.grind();
+    vGrind.set(g === '' ? '–' : (trimNum(g) === '–' ? String(g) : trimNum(g)));
+    const dose = values.dose();
+    vDose.set(dose ? num(dose, 1) : '–', 'g');
+    const out = values.out();
+    vOut.set(out > 0 ? num(out, 0) : 'Off', out > 0 ? 'g' : '', out > 0 && dose ? ratio(dose, out) : '');
+    setText(saving, { saving: 'Saving…', saved: 'Saved', error: 'Not saved' }[S.saving] || '');
+    setAttr(saving, 'data-state', S.saving || null);
+  }
+
+  function updateNext() {
+    const st = status();
     const ghc = S.info?.GHC !== false;
     const ready = st.tone === 'ok';
-    const busy = ['steam', 'hotWater', 'flush'].includes(S.snap?.state?.state);
-    show(startBtn, ready && !ghc);
-    show(stopBtn, busy);
-    show(scanBtn, !S.machineConnected);
-    show(demoBtn, S.mode === 'demo' && ready && ghc);
-    if (!S.machineConnected) {
-      setText(nextTitle, 'Switch the machine on');
-      setText(nextSub, 'It connects by itself once it is in range.');
-    } else if (busy) {
-      setText(nextTitle, `${st.title}. Wait for it to finish, or stop it here.`);
-      setText(nextSub, '');
-    } else if (!ready) {
-      setText(nextTitle, st.tone === 'warn' ? st.sub : 'Wait for the machine to heat up');
-      setText(nextSub, st.tone === 'warn' ? '' : st.sub);
-    } else {
-      setText(nextTitle, ghc ? 'Lock in the portafilter, then press espresso on the machine' : 'Lock in the portafilter');
-      setText(nextSub, S.scaleConnected
-        ? 'The scale zeroes itself when the shot starts.'
-        : 'No scale connected, so stop the shot yourself.');
-    }
+    setAttr(stage, 'data-tone', st.tone);
+    show(startShot, ready && !ghc);
+    show(demoPress, S.mode === 'demo' && ready && ghc);
+    let text;
+    if (!S.machineConnected) text = 'Switch the machine on. It connects by itself.';
+    else if (!ready) text = st.tone === 'warn' ? st.sub : `${st.title}${st.sub ? ` · ${st.sub}` : ''}`;
+    else if (ghc) text = S.scaleConnected ? 'Lock in the portafilter and press espresso on the machine' : 'Press espresso on the machine. No scale, so stop it yourself.';
+    else text = S.scaleConnected ? 'Lock in the portafilter' : 'Lock in the portafilter. No scale, so stop it yourself.';
+    setText(nextText, text);
+
+    const mode = gatewayMode();
+    show(warn, mode === 'full' || mode === 'disabled');
+    setText(warnText, mode === 'disabled'
+      ? 'Gateway mode is Disabled, so Decaid shows its own shot screen. Switch to Tracking'
+      : 'Gateway mode is Full, so shots will not stop by weight. Switch to Tracking');
   }
 
   function updateLast() {
     const shot = S.shots?.[0];
-    show(lastBody, Boolean(shot));
-    show(lastEmpty, !shot);
+    show(last, Boolean(shot) && S.layout.last !== false);
     if (!shot) return;
     const detail = S.shotDetails[shot.id];
     const extra = shot.annotations?.extras?.mise || {};
     const out = Number(shot.annotations?.actualYield) || Number(extra.out) || detail?.out;
     const seconds = detail?.seconds || Number(extra.seconds);
     setText(lastWhen, `Last shot · ${when(shot.timestamp)}`);
-    setText(lastOut, out ? `${num(out, 1)} g` : '–');
-    setText(lastTime, seconds ? `in ${Math.round(seconds)} s` : '');
-    show(lastTag, Boolean(extra.taste));
-    setText(lastTag, extra.taste || '');
-    const note = shot.annotations?.espressoNotes || '';
-    show(lastNote, Boolean(note));
-    setText(lastNote, note);
+    setText(lastOut, [out ? `${num(out, 1)} g` : null, seconds ? `in ${Math.round(seconds)} s` : null].filter(Boolean).join(' ') || '–');
+    show(lastTaste, Boolean(extra.taste));
+    setText(lastTaste, extra.taste || '');
     mini.draw(detail?.samples || null);
-    lastOpen.onclick = () => { selectShot(shot.id); go('history'); };
+    last.onclick = () => { selectShot(shot.id); go('history'); };
   }
 
   function update() {
-    head.update();
-    const st = status();
-    const profile = S.workflow?.profile;
-    setText(title, displayTitle(profile?.title) || 'No recipe loaded');
-    const current = profile ? visibleProfiles().find((r) => r.profile.title === profile.title) : null;
-    show(rename, Boolean(current));
-    rename.onclick = current ? () => openRename(current) : null;
-    show(dup, Boolean(current));
-    dup.onclick = current ? () => openDuplicate(current) : null;
-    show(details, Boolean(current));
-    details.onclick = current ? () => openRecipe(current.id) : null;
-    show(copyTag, copyInUse());
-    const context = S.workflow?.context || {};
-    setText(coffee, [context.coffeeName, context.coffeeRoaster].filter(Boolean).join(' · '));
-    if (profile !== curveFor) {
-      curveFor = profile;
-      replaceKids(curveBox, profile ? [profileCurve(profile, 'curve curve-large')] : []);
-      setText(blurb, firstSentence(profile?.notes, 110));
-    }
-    for (const s of steppers) s.update();
-    const out = values.out();
-    setText(ratioEl, ratio(values.dose(), out));
-    const mode = gatewayMode();
-    setText(stopNote, out <= 0 ? 'Stop by weight is off'
-      : mode === 'full' ? 'Gateway mode is Full, so stop the shot yourself'
-        : S.scaleConnected ? `Stops by itself when the scale reads ${num(out, 0)} g` : 'Connect a scale to stop by weight');
-    show(modeBanner, mode === 'full' || mode === 'disabled');
-    if (mode === 'disabled') {
-      setText(modeTitle, 'Decaid will show its own shot screen');
-      setText(modeText, 'Gateway mode is Disabled. Tap to switch it to Tracking.');
-    } else if (mode === 'full') {
-      setText(modeTitle, 'Shots will not stop by weight');
-      setText(modeText, 'Gateway mode is Full. Tap to switch it to Tracking.');
-    }
-    setText(saving, { saving: 'Saving…', saved: 'Saved', error: 'Not saved' }[S.saving] || '');
-    setAttr(saving, 'data-state', S.saving || null);
-    updateFavorites();
-    updateNext(st);
-    const due = cleaningDue();
-    show(clean, due);
-    if (due) setText(cleanText, `${shotsSinceClean()} shots since the last clean`);
+    updateCards();
+    updateCarousel();
+    updateValues();
+    updateNext();
     updateLast();
   }
 

@@ -1,126 +1,135 @@
-// History: recent shots on the left, the selected one on the right.
+// History: your shots on the left, the chosen one on the right with its
+// chart and steps. Compare lays a second shot underneath, faint.
 
-import { h, setText, show, replaceKids } from '../dom.js';
-import { S, selectShot, brewAgain, displayTitle } from '../store.js';
-import { num, ratio, when, trimNum, brewTemp } from '../format.js';
+import { h, setText, setAttr, show, replaceKids, icon } from '../dom.js';
+import { S, selectShot, brewAgain, displayTitle, compareWith } from '../store.js';
+import { num, ratio, when, trimNum, brewTemp, deg, stageStats } from '../format.js';
 import { createChart } from '../chart.js';
-import { card } from './parts.js';
+import { sheetHead } from './parts.js';
+import { stageCards } from './shot.js';
 
 export function createHistory() {
+  const head = sheetHead({ title: 'History', sub: 'Every shot is saved. Tap one to see it.' });
   const list = h('div', { class: 'shot-list' });
   let listKey = '';
+  let picking = false;
 
-  const dWhen = h('span', { class: 'label' });
-  const dOut = h('span', { class: 'detail-out' });
-  const dTime = h('span', { class: 'muted' });
-  const chart = createChart({ width: 470, height: 250 });
-  const fact = (label, wide) => {
-    const value = h('dd');
-    return { value, el: h('div', { class: wide ? 'fact fact-wide' : 'fact' }, h('dt', { text: label }), value) };
+  const dWhen = h('span', { class: 'val-label' });
+  const dTitle = h('h2', { class: 'detail-title' });
+  const stat = (label) => {
+    const v = h('span', { class: 'stat-num' });
+    return { v, el: h('div', { class: 'stat' }, h('span', { class: 'val-label', text: label }), v) };
   };
-  const fDose = fact('Coffee in');
-  const fRatio = fact('Ratio');
-  const fGrind = fact('Grinder setting');
-  const fTemp = fact('Temperature');
-  const fCoffee = fact('Coffee', true);
-  const fTaste = fact('Taste');
-  const fNotes = fact('Notes', true);
-  const again = h('button', { class: 'btn btn-primary btn-block', type: 'button', text: 'Brew this again' });
+  const sOut = stat('Espresso out');
+  const sTime = stat('Time');
+  const sRatio = stat('Ratio');
+  const sDose = stat('Coffee in');
+  const sGrind = stat('Grind');
+  const sTemp = stat('Temperature');
+  const taste = h('span', { class: 'pill' });
+  const notes = h('p', { class: 'detail-notes' });
+  const chart = createChart({ width: 1000, height: 300 });
+  const stages = h('ol', { class: 'stage-strip stage-strip-small' });
+  const cmpText = h('span');
+  const cmpBar = h('div', { class: 'compare-bar' }, icon('compare', 'icon'), cmpText,
+    h('button', { class: 'link', type: 'button', text: 'Stop comparing', onClick: () => { picking = false; compareWith(null); } }));
+  const compareBtn = h('button', { class: 'btn btn-outline', type: 'button', onClick: () => { picking = !picking; listKey = ''; update(); } }, icon('compare', 'icon'), h('span', { text: 'Compare' }));
+  const again = h('button', { class: 'btn btn-primary', type: 'button', text: 'Brew this again' });
   const loading = h('p', { class: 'muted', text: 'Loading this shot…' });
-  const detailBody = h('div', { class: 'detail-body' },
-    h('div', { class: 'detail-head' }, dWhen, h('div', { class: 'detail-figures' }, dOut, dTime)),
-    chart.el,
-    h('div', { class: 'legend' },
-      h('span', { class: 'c-pressure', text: 'Pressure' }), h('span', { class: 'c-flow', text: 'Flow' }), h('span', { class: 'c-weight', text: 'Weight' })),
-    loading,
-    h('dl', { class: 'facts' }, fDose.el, fRatio.el, fGrind.el, fTemp.el, fCoffee.el, fTaste.el, fNotes.el));
-  const detailEmpty = h('p', { class: 'muted', text: 'Tap a shot to see it here.' });
-  let drawnFor = null;
+  const empty = h('p', { class: 'muted empty', text: 'No shots yet. They appear here as you pull them.' });
+  const detail = h('section', { class: 'detail' },
+    h('div', { class: 'detail-top' },
+      h('div', { class: 'detail-head' }, dWhen, h('div', { class: 'title-row' }, dTitle, taste)),
+      h('div', { class: 'detail-actions' }, compareBtn, again)),
+    h('div', { class: 'stat-row' }, sOut.el, sTime.el, sRatio.el, sDose.el, sGrind.el, sTemp.el),
+    cmpBar,
+    h('div', { class: 'legend' }, h('span', { class: 'c-pressure', text: 'Pressure' }), h('span', { class: 'c-flow', text: 'Flow' }), h('span', { class: 'c-weight', text: 'Weight' })),
+    chart.el, loading, stages, notes);
+  const pickHint = h('p', { class: 'pick-hint', text: 'Pick a shot to compare with' });
 
-  const el = h('div', { class: 'view view-history' },
-    h('header', { class: 'page-head' },
-      h('div', { class: 'page-head-text' }, h('h1', { class: 'page-title', text: 'History' }),
-        h('span', { class: 'page-sub', text: 'Every shot is saved. Tap one to see it, or to brew it again.' }))),
+  const el = h('div', { class: 'sheet-body view-history' },
+    head.el,
     h('div', { class: 'history-body' },
-      card('list-card',
-        h('div', { class: 'shot-row shot-head', 'aria-hidden': 'true' },
-          h('span', { text: 'When' }), h('span', { text: 'Recipe' }), h('span', { text: 'In → out' }), h('span', { text: 'Time' }), h('span', { text: 'Taste' })),
-        list),
-      card('detail-card', detailBody, detailEmpty, again)));
+      h('div', { class: 'list-col' }, pickHint, list),
+      detail, empty));
 
   function figures(shot) {
-    const detail = S.shotDetails[shot.id];
+    const d = S.shotDetails[shot.id];
     const extra = shot.annotations?.extras?.mise || {};
     return {
       dose: Number(shot.annotations?.actualDoseWeight) || Number(shot.workflow?.context?.targetDoseWeight) || null,
-      out: Number(shot.annotations?.actualYield) || Number(extra.out) || detail?.out || null,
-      seconds: detail?.seconds || Number(extra.seconds) || null,
+      out: Number(shot.annotations?.actualYield) || Number(extra.out) || d?.out || null,
+      seconds: d?.seconds || Number(extra.seconds) || null,
       taste: extra.taste || '',
     };
   }
 
   function updateList() {
-    const shots = S.shots;
-    const key = !shots ? 'loading' : shots.map((s) => {
-      const f = figures(s);
-      return `${s.id}:${f.out}:${f.seconds}:${f.taste}`;
-    }).join('|') + `#${S.selectedShot}#${Object.values(S.names).join(',')}`;
+    const shots = S.shots || [];
+    const key = `${shots.map((s) => s.id).join(',')}|${S.selectedShot}|${S.compareShot}|${picking}|${Object.keys(S.shotDetails).length}`;
     if (key === listKey) return;
     listKey = key;
-    if (!shots) { replaceKids(list, [h('p', { class: 'muted empty', text: 'Loading shots…' })]); return; }
-    if (!shots.length) { replaceKids(list, [h('p', { class: 'muted empty', text: 'No shots yet. Your first one will appear here.' })]); return; }
     replaceKids(list, shots.map((shot) => {
       const f = figures(shot);
+      const isCmp = shot.id === S.compareShot;
       return h('button', {
-        class: 'shot-row', type: 'button', 'aria-pressed': shot.id === S.selectedShot ? 'true' : 'false',
-        onClick: () => selectShot(shot.id),
+        class: 'shot-row', type: 'button',
+        'aria-pressed': shot.id === S.selectedShot ? 'true' : 'false',
+        'data-compare': isCmp ? 'true' : null,
+        onClick: () => {
+          if (picking) { picking = false; compareWith(shot.id); listKey = ''; return; }
+          selectShot(shot.id);
+        },
       },
-      h('strong', { text: when(shot.timestamp) }),
-      h('strong', { class: 'clip', text: displayTitle(shot.workflow?.profile?.title) || shot.workflow?.name || 'Espresso' }),
-      h('span', { text: `${f.dose ? num(f.dose, 1) : '–'} → ${f.out ? `${num(f.out, 1)} g` : '–'}` }),
-      h('span', { text: f.seconds ? `${Math.round(f.seconds)} s` : '–' }),
-      f.taste
-        ? h('span', { class: f.taste === 'Just right' ? 'pill pill-solid' : 'pill', text: f.taste })
-        : h('span', { class: 'muted small', text: 'Not rated' }));
+      h('span', { class: 'shot-row-top' }, h('strong', { text: when(shot.timestamp) }), f.taste ? h('span', { class: 'pill pill-quiet', text: f.taste }) : null),
+      h('span', { class: 'muted', text: displayTitle(shot.workflow?.profile?.title) || 'Espresso' }),
+      h('span', { class: 'shot-row-nums', text: [f.dose && f.out ? `${num(f.dose, 1)} → ${num(f.out, 1)} g` : (f.out ? `${num(f.out, 1)} g` : null), f.seconds ? `${Math.round(f.seconds)} s` : null].filter(Boolean).join(' · ') }));
     }));
   }
 
-  function updateDetail() {
-    const shot = (S.shots || []).find((s) => s.id === S.selectedShot);
-    show(detailBody, Boolean(shot));
-    show(detailEmpty, !shot);
-    show(again, Boolean(shot));
-    if (!shot) return;
-    const detail = S.shotDetails[shot.id];
-    const f = figures(shot);
-    const context = shot.workflow?.context || {};
-    setText(dWhen, `${when(shot.timestamp)} · ${displayTitle(shot.workflow?.profile?.title) || 'Espresso'}`);
-    setText(dOut, f.out ? `${num(f.out, 1)} g` : '–');
-    setText(dTime, f.seconds ? `in ${Math.round(f.seconds)} s` : '');
-    show(loading, !detail);
-    if (detail && drawnFor !== detail) {
-      drawnFor = detail;
-      chart.draw({ samples: detail.samples, target: 0 });
-      chart.el.setAttribute('aria-label', `Chart of the shot from ${when(shot.timestamp)}.`);
-    } else if (!detail && drawnFor !== null) {
-      drawnFor = null;
-      chart.draw({ samples: [], target: 0 });
-    }
-    const temp = brewTemp(shot.workflow?.profile);
-    const grind = context.grinderSetting;
-    setText(fDose.value, f.dose ? `${num(f.dose, 1)} g` : '–');
-    setText(fRatio.value, ratio(f.dose, f.out));
-    setText(fGrind.value, grind != null && grind !== '' ? (trimNum(grind) === '–' ? String(grind) : trimNum(grind)) : '–');
-    setText(fTemp.value, temp != null ? `${trimNum(temp)} °C` : '–');
-    setText(fCoffee.value, [context.coffeeName, context.coffeeRoaster].filter(Boolean).join(' · ') || '–');
-    setText(fTaste.value, f.taste || 'Not rated');
-    setText(fNotes.value, shot.annotations?.espressoNotes || '–');
-    again.onclick = () => brewAgain(detail?.record || shot);
-  }
-
+  let drawnKey = '';
   function update() {
     updateList();
-    updateDetail();
+    show(pickHint, picking);
+    setAttr(compareBtn, 'aria-pressed', picking || S.compareShot ? 'true' : 'false');
+    const shot = (S.shots || []).find((s) => s.id === S.selectedShot) || null;
+    show(detail, Boolean(shot));
+    show(empty, !shot && !(S.shots || []).length);
+    if (!shot) return;
+    const d = S.shotDetails[shot.id];
+    const f = figures(shot);
+    const ctx = shot.workflow?.context || {};
+    setText(dWhen, when(shot.timestamp));
+    setText(dTitle, displayTitle(shot.workflow?.profile?.title) || 'Espresso');
+    show(taste, Boolean(f.taste));
+    setText(taste, f.taste);
+    setText(sOut.v, f.out ? `${num(f.out, 1)} g` : '–');
+    setText(sTime.v, f.seconds ? `${num(f.seconds, 1)} s` : '–');
+    setText(sRatio.v, ratio(f.dose, f.out));
+    setText(sDose.v, f.dose ? `${num(f.dose, 1)} g` : '–');
+    setText(sGrind.v, ctx.grinderSetting != null && ctx.grinderSetting !== '' ? (trimNum(ctx.grinderSetting) === '–' ? String(ctx.grinderSetting) : trimNum(ctx.grinderSetting)) : '–');
+    const t = brewTemp(shot.workflow?.profile);
+    setText(sTemp.v, t != null ? deg(t, 1) : '–');
+    const note = shot.annotations?.espressoNotes || '';
+    show(notes, Boolean(note));
+    setText(notes, note);
+    show(loading, !d);
+
+    const cmpShot = S.compareShot ? (S.shots || []).find((s) => s.id === S.compareShot) : null;
+    const cmp = cmpShot ? S.shotDetails[cmpShot.id] : null;
+    show(cmpBar, Boolean(cmpShot));
+    if (cmpShot) {
+      const cf = figures(cmpShot);
+      setText(cmpText, `Faint lines: ${when(cmpShot.timestamp)} · ${displayTitle(cmpShot.workflow?.profile?.title) || 'Espresso'}${cf.out ? ` · ${num(cf.out, 1)} g` : ''}${cf.seconds ? ` in ${Math.round(cf.seconds)} s` : ''}`);
+    }
+    const key = `${shot.id}|${Boolean(d)}|${S.compareShot}|${Boolean(cmp)}|${S.layout.unit}`;
+    if (d && key !== drawnKey) {
+      drawnKey = key;
+      chart.draw({ samples: d.samples, target: 0, compare: cmp?.samples || null });
+      setAttr(chart.el, 'aria-label', `Chart of the shot from ${when(shot.timestamp)}${cmpShot ? `, compared with ${when(cmpShot.timestamp)}` : ''}.`);
+      replaceKids(stages, stageCards(stageStats(d.samples, shot.workflow?.profile?.steps || [])));
+    }
+    again.onclick = () => brewAgain(d?.record || shot);
   }
 
   return { el, update };

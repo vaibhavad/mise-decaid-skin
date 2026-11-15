@@ -1,8 +1,11 @@
 // Application state and every action that changes it. Views read `S` and are
 // told to refresh through subscribe(); they never talk to the gateway directly.
 
-import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot, tankMl, litres, TANK_ML } from './format.js';
+import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot, sampleFrom, tankMl, litres, TANK_ML, setTempUnit } from './format.js';
 import { fetchWeather, searchPlaces, demoWeather, demoPlaces } from './weather.js';
+
+export const UTILITY_CARDS = ['hotWater', 'steam', 'flush', 'scale'];
+export const DEFAULT_LAYOUT = { cards: UTILITY_CARDS.slice(), hidden: [], tank: true, last: true, unit: 'c', screenOff: 0 };
 
 export const S = {
   mode: 'connecting',        // connecting | live | demo | offline
@@ -21,7 +24,7 @@ export const S = {
   shotDetails: {},           // id -> full record
   selectedShot: null,
   cleaning: { interval: 50, totalAtClean: null, cleanedAt: null },
-  view: 'home',              // home | recipes | recipe | water | history | review
+  view: 'home',              // home, or a sheet over it: recipes | recipe | history | settings
   recipeId: null,            // the recipe open in the detail page
   shot: null,                // live shot being pulled
   review: null,              // the shot that just finished
@@ -36,6 +39,10 @@ export const S = {
   copies: [],                // your duplicated recipes, kept by Mise
   place: null,               // weather city: { name, region, latitude, longitude, unit }
   weather: null,             // latest weather for the sleep screen
+  layout: { ...DEFAULT_LAYOUT }, // what the Brew screen shows, units, screen off
+  editor: null,              // the value being edited with the ruler
+  utility: null,             // steam, hot water or flush while it runs
+  compareShot: null,         // shot laid under the selected one in History
 };
 
 let T = null;                // transport: { request, stream, demo }
@@ -107,6 +114,7 @@ export async function loadAll() {
     quiet(T.request('GET', api('/settings'))).then((s) => { if (s && typeof s === 'object') S.settings = s; }),
     quiet(T.request('GET', api('/store/mise/recipes'))).then((c) => { if (Array.isArray(c)) S.copies = c.filter((x) => x?.id && x?.profile?.title); }),
     quiet(T.request('GET', api('/store/mise/weather'))).then((p) => { if (p && typeof p.latitude === 'number') S.place = p; }),
+    quiet(T.request('GET', api('/store/mise/layout'))).then((l) => { if (l && typeof l === 'object' && !Array.isArray(l)) applyLayout(l); }),
   ]);
   if (S.cleaning.totalAtClean == null && S.shotsTotal != null) {
     S.cleaning.totalAtClean = S.shotsTotal;
@@ -213,14 +221,30 @@ function onSnapshot(snap) {
       // Decaid zeroes the scale as the shot starts; skip the first second so a
       // cup's weight from before the tare never reaches the chart.
       const weight = shot.seconds < 1 || S.scale.weight == null ? null : Math.max(0, S.scale.weight);
-      shot.samples.push({ t: shot.seconds, p: snap.pressure || 0, f: snap.flow || 0, w: weight });
+      shot.samples.push(sampleFrom(snap, shot.seconds, weight));
     } else if (shot.phase === 'running') {
       shot.phase = 'ending';
     }
   } else if (S.shot) {
     finishShot();
   }
+  trackUtility(state);
   emit();
+}
+
+// Steam, hot water and flush: how long the current one has been running.
+// The card stays up for a moment after it ends, so the last reading shows.
+let utilityTimer = null;
+function trackUtility(state) {
+  const running = ['steam', 'hotWater', 'flush'].includes(state);
+  if (running) {
+    clearTimeout(utilityTimer);
+    if (!S.utility || S.utility.state !== state || S.utility.ended) S.utility = { state, startedAt: Date.now(), ended: false };
+  } else if (S.utility && !S.utility.ended) {
+    S.utility.ended = true;
+    S.utility.endedAt = Date.now();
+    utilityTimer = setTimeout(() => { S.utility = null; emit(); }, 1200);
+  }
 }
 
 function finishShot() {
@@ -240,13 +264,13 @@ function finishShot() {
     seconds: shot.seconds,
     out: S.scaleConnected && S.scale.weight != null ? S.scale.weight : null,
     samples: shot.samples,
+    steps: S.workflow?.profile?.steps || [],
     id: shot.id,
     notes: '',
     taste: null,
     saved: '',
     previous: previous ? { seconds: previous.seconds, out: previous.out } : null,
   };
-  S.view = 'review';
   findSavedShot(0);
 }
 
@@ -302,7 +326,6 @@ export function closeReview() {
   clearTimeout(reviewTimer);
   if (S.review?.recordFound) saveReview();
   S.review = null;
-  S.view = 'home';
   emit();
 }
 
@@ -461,6 +484,30 @@ export function toggleFavorite(id) {
   T.request('POST', api('/store/mise/favorites'), next).catch(() => toast('Could not save your starred recipes.'));
 }
 
+// The recipes on the Brew screen's carousel: your starred ones, plus the one
+// in use when it is not starred.
+export function carouselRecords() {
+  const all = visibleProfiles();
+  const list = favoriteIds().map((id) => all.find((r) => r.id === id)).filter(Boolean);
+  const title = S.workflow?.profile?.title;
+  if (title && !list.some((r) => r.profile.title === title)) {
+    const current = all.find((r) => r.profile.title === title);
+    if (current) list.push(current);
+  }
+  return list;
+}
+
+export function moveFavorite(id, by) {
+  const list = favoriteIds().slice();
+  const i = list.indexOf(id);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  S.favorites = list;
+  emit();
+  T.request('POST', api('/store/mise/favorites'), list).catch(() => toast('Could not save the order.'));
+}
+
 export function isInUse(record) {
   return Boolean(S.workflow?.profile?.title) && record.profile.title === S.workflow.profile.title;
 }
@@ -562,6 +609,12 @@ export async function loadRecipe(record) {
   S.view = 'home';
   emit();
   await useProfile(record, `Loaded ${nameOf(record)}`);
+}
+
+export function compareWith(id) {
+  S.compareShot = id && id !== S.selectedShot ? id : null;
+  if (S.compareShot) loadShotDetail(S.compareShot);
+  emit();
 }
 
 export function selectShot(id) {
@@ -708,6 +761,50 @@ export function openDuplicate(record) {
 export function openCity() {
   S.dialog = { kind: 'city' };
   emit();
+}
+
+// The ruler: one editor for every number. `spec` holds label, unit, value,
+// min, max, step, presets and a save(value) function.
+export function openEditor(spec) {
+  S.editor = spec;
+  emit();
+}
+
+export function closeEditor() {
+  S.editor = null;
+  emit();
+}
+
+// ── Brew screen layout and units ─────────────────────────────────────────
+
+function applyLayout(saved) {
+  const cards = Array.isArray(saved.cards) ? saved.cards.filter((c) => UTILITY_CARDS.includes(c)) : [];
+  for (const c of UTILITY_CARDS) if (!cards.includes(c)) cards.push(c);
+  S.layout = {
+    ...DEFAULT_LAYOUT, ...saved, cards,
+    hidden: Array.isArray(saved.hidden) ? saved.hidden.filter((c) => UTILITY_CARDS.includes(c)) : [],
+  };
+  setTempUnit(S.layout.unit);
+}
+
+export function updateLayout(patch) {
+  applyLayout({ ...S.layout, ...patch });
+  emit();
+  quiet(T.request('POST', api('/store/mise/layout'), S.layout));
+}
+
+export function moveCard(card, by) {
+  const cards = S.layout.cards.slice();
+  const i = cards.indexOf(card);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= cards.length) return;
+  [cards[i], cards[j]] = [cards[j], cards[i]];
+  updateLayout({ cards });
+}
+
+export function toggleCard(card) {
+  const hidden = S.layout.hidden.includes(card) ? S.layout.hidden.filter((c) => c !== card) : [...S.layout.hidden, card];
+  updateLayout({ hidden });
 }
 
 export function closeDialog() {

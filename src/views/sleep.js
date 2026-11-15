@@ -153,10 +153,32 @@ export function createSleep() {
     setText(date, now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }));
   }
 
+  // Screen off: after the delay set in Settings the clock goes dark. A tap
+  // brings it back; holding for a second anywhere wakes the machine.
+  const black = h('div', { class: 'sleep-black', hidden: true, 'aria-hidden': 'true' });
+  el.append(black);
+  let darkTimer = null;
+  let holdTimer = null;
+  function armDark() {
+    clearTimeout(darkTimer);
+    const minutes = Number(S.layout?.screenOff) || 0;
+    if (visible && minutes > 0) darkTimer = setTimeout(() => show(black, true), minutes * 60 * 1000);
+  }
+  el.addEventListener('pointerdown', (e) => {
+    holdTimer = setTimeout(() => { show(black, false); requestState('idle'); }, 1000);
+    if (!black.hasAttribute('hidden')) { e.preventDefault(); show(black, false); armDark(); }
+  });
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(type, () => clearTimeout(holdTimer));
+  let darkFor = null;
+
   function update(asleep) {
+    if (visible && asleep && darkFor !== S.layout?.screenOff) { darkFor = S.layout?.screenOff; armDark(); }
     if (asleep !== visible) {
       visible = asleep;
       show(el, asleep);
+      show(black, false);
+      darkFor = S.layout?.screenOff;
+      if (asleep) armDark(); else clearTimeout(darkTimer);
       clearInterval(ticker);
       clearInterval(refresher);
       if (asleep) {

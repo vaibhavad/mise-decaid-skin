@@ -1,24 +1,27 @@
-// Entry point: picks the gateway (or the demo), builds the shell, and swaps
-// screens as the state changes.
+// Entry point: picks the gateway (or the demo), builds the shell, and shows
+// what fits the moment: Brew underneath, a sheet over it when one is open,
+// and the shot, steam or the sleep screen over everything when the machine
+// is busy or asleep.
 
 import { h, setText, setAttr, show, icon } from './dom.js';
 import { gatewayHost, httpTransport, savedGateway, forgetGateway } from './api.js';
 import { createSim } from './sim.js';
 import {
-  S, subscribe, connect, loadAll, go, requestState, heartbeat, toast, transport, reloadMachine, closeReview,
+  S, subscribe, connect, loadAll, go, requestState, heartbeat, toast, transport, reloadMachine, status, closeEditor,
 } from './store.js';
+import { deg } from './format.js';
 import { createHome } from './views/home.js';
-import { createBrewing } from './views/brewing.js';
-import { createReview } from './views/review.js';
+import { createShot } from './views/shot.js';
+import { createUtility } from './views/utility.js';
+import { createRuler } from './views/ruler.js';
 import { createRecipes } from './views/recipes.js';
 import { createRecipe } from './views/recipe.js';
-import { createWater } from './views/water.js';
 import { createHistory } from './views/history.js';
 import { createSettings } from './views/settings.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 document.documentElement.dataset.miseVersion = VERSION;
 const app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -26,28 +29,17 @@ const params = new URLSearchParams(location.search);
 // drop the query string.
 const forcedDemo = document.documentElement.hasAttribute('data-demo');
 
-// ── Shell ────────────────────────────────────────────────────────────────
+// ── Demo panel ───────────────────────────────────────────────────────────
 
-const NAV = [
-  { view: 'home', label: 'Brew', icon: 'brew' },
-  { view: 'recipes', label: 'Recipes', icon: 'recipes' },
-  { view: 'water', label: 'Milk & water', icon: 'water' },
-  { view: 'history', label: 'History', icon: 'history' },
-];
-
-const navButtons = NAV.map((item) => h('button', {
-  class: 'rail-item', type: 'button',
-  onClick: () => { if (S.view === 'review') closeReview(); go(item.view); },
-}, icon(item.icon), h('span', { text: item.label })));
-
+const ghcButton = h('button', { class: 'btn btn-outline', type: 'button', onClick: toggleGhc, text: 'Group-head buttons: on' });
+const leaveButton = h('button', { class: 'btn btn-outline', type: 'button', onClick: () => { location.href = location.pathname; }, text: 'Leave the demo' });
 const demoPanel = h('div', { class: 'demo-panel', hidden: true },
   h('strong', { text: 'Demo mode' }),
   h('span', { class: 'muted', text: 'A pretend machine and scale. Nothing here reaches a real machine.' }),
   h('button', { class: 'btn btn-outline', type: 'button', onClick: () => { transport().press('espresso'); show(demoPanel, false); }, text: 'Press the espresso button' }),
-  h('button', { class: 'btn btn-outline', type: 'button', onClick: toggleGhc, text: 'Group-head buttons: on' }),
+  h('button', { class: 'btn btn-outline', type: 'button', onClick: () => { transport().press('steam'); show(demoPanel, false); }, text: 'Press the steam button' }),
   h('button', { class: 'btn btn-outline', type: 'button', onClick: () => transport().cycleWater(), text: 'Change the water level' }),
-  h('button', { class: 'btn btn-outline', type: 'button', onClick: leaveDemo, text: 'Leave the demo' }));
-const ghcButton = demoPanel.children[3];
+  ghcButton, leaveButton);
 const demoBadge = h('button', { class: 'demo-badge', type: 'button', hidden: true, onClick: () => show(demoPanel, demoPanel.hasAttribute('hidden')), text: 'Demo' });
 
 function toggleGhc() {
@@ -57,10 +49,7 @@ function toggleGhc() {
   reloadMachine();
 }
 
-function leaveDemo() {
-  location.href = location.pathname;
-}
-
+// ── Top bar ──────────────────────────────────────────────────────────────
 
 // Inside the Decaid app a skin fills the screen, and on tablets set to button
 // navigation there is no edge swipe to leave it. Decaid gives embedded skins
@@ -68,26 +57,47 @@ function leaveDemo() {
 function exitToDecaid() {
   try { window.decentApp.exitToDashboard(); } catch { toast('Use the Android Back button to return to Decaid.'); }
 }
-const exitButton = h('button', { class: 'rail-item', type: 'button', hidden: true, 'aria-label': 'Exit to the Decaid dashboard', onClick: exitToDecaid }, icon('exit'), h('span', { text: 'Exit' }));
 
-const settingsButton = h('button', {
-  class: 'rail-item', type: 'button',
-  onClick: () => { if (S.view === 'review') closeReview(); go('settings'); },
-}, icon('settings'), h('span', { text: 'Settings' }));
+const pillText = h('span');
+const pill = h('span', { class: 'status-pill', role: 'status' }, h('span', { class: 'status-dot', 'aria-hidden': 'true' }), pillText);
+const topBtn = (name, label, onClick) => h('button', { class: 'top-btn', type: 'button', 'aria-label': label, onClick }, icon(name), h('span', { class: 'top-label', text: label }));
+const historyBtn = topBtn('history', 'History', () => go('history'));
+const settingsBtn = topBtn('settings', 'Settings', () => go('settings'));
+const sleepBtn = topBtn('sleep', 'Sleep', () => requestState('sleeping'));
+const exitBtn = topBtn('exit', 'Exit', exitToDecaid);
+exitBtn.hidden = true;
 
-const rail = h('nav', { class: 'rail', 'aria-label': 'Main' },
-  h('div', { class: 'rail-group' }, h('div', { class: 'wordmark', text: 'mise' }), navButtons),
-  h('div', { class: 'rail-group' },
-    demoBadge,
-    settingsButton,
-    exitButton,
-    h('button', { class: 'rail-item', type: 'button', onClick: () => requestState('sleeping') }, icon('sleep'), h('span', { text: 'Sleep' }))));
+const topbar = h('header', { class: 'topbar' },
+  h('div', { class: 'top-left' }, h('span', { class: 'wordmark', text: 'mise' }), pill),
+  h('div', { class: 'top-right' }, demoBadge, historyBtn, settingsBtn, sleepBtn, exitBtn));
 
-const main = h('main', { class: 'main' });
-const toastEl = h('div', { class: 'toast', role: 'status', hidden: true });
+function pillLine() {
+  const st = status();
+  const snap = S.snap;
+  const group = Number(snap?.groupTemperature);
+  const target = Number(snap?.targetGroupTemperature);
+  const short = {
+    ok: 'Ready', wait: st.title, busy: st.title, warn: st.title, off: st.title,
+  }[st.tone] || st.title;
+  let temp = '';
+  if (S.machineConnected && Number.isFinite(group) && group > 0) {
+    temp = st.tone === 'wait' && target > 0 ? `${deg(group)} of ${deg(target)}` : deg(group);
+  }
+  return { tone: st.tone, text: [short, temp].filter(Boolean).join(' · ') };
+}
 
+// ── Layers ───────────────────────────────────────────────────────────────
+
+const home = createHome();
+const shot = createShot();
+const utility = createUtility();
+const ruler = createRuler();
 const sleep = createSleep();
 const dialogs = createDialogs();
+const sheetBox = h('div', { class: 'sheet' });
+const sheetLayer = h('div', { class: 'sheet-layer', hidden: true }, sheetBox);
+sheetLayer.addEventListener('pointerdown', (e) => { if (e.target === sheetLayer) go('home'); });
+const toastEl = h('div', { class: 'toast', role: 'status', hidden: true });
 
 // Connection screens
 const coverTitle = h('h1', { class: 'page-title' });
@@ -101,21 +111,19 @@ const cover = h('div', { class: 'cover', hidden: true },
   h('div', { class: 'cover-actions' }, retry, forget, tryDemo),
   h('span', { class: 'muted small', text: `Version ${VERSION}` }));
 
-app.append(rail, main, cover, sleep.el, demoPanel, dialogs.el, toastEl);
+const main = h('main', { class: 'main' }, topbar, home.el);
+app.append(main, sheetLayer, shot.el, utility.el, ruler.el, dialogs.el, cover, sleep.el, demoPanel, toastEl);
 
-// ── Screens ──────────────────────────────────────────────────────────────
+const sheets = { recipes: createRecipes, recipe: createRecipe, history: createHistory, settings: createSettings };
+const built = {};
+let currentSheet = null;
 
-const factories = {
-  home: createHome, recipes: createRecipes, recipe: createRecipe, water: createWater,
-  history: createHistory, review: createReview, brewing: createBrewing, settings: createSettings,
-};
-const screens = {};
-let current = null;
-
-function screen(name) {
-  if (!screens[name]) screens[name] = factories[name]();
-  return screens[name];
+function sheet(name) {
+  if (!built[name]) built[name] = sheets[name]();
+  return built[name];
 }
+
+// ── Render ───────────────────────────────────────────────────────────────
 
 function render() {
   const connecting = S.mode === 'connecting';
@@ -134,24 +142,33 @@ function render() {
   if (connecting || offline) return;
 
   show(demoBadge, S.mode === 'demo');
-  show(exitButton, Boolean(window.__DECENT_HOST__));
-  const brewing = Boolean(S.shot);
-  const asleep = !brewing && S.snap?.state?.state === 'sleeping';
+  show(exitBtn, Boolean(window.__DECENT_HOST__));
+  const p = pillLine();
+  setAttr(pill, 'data-tone', p.tone);
+  setText(pillText, p.text);
+
+  const asleep = !S.shot && S.snap?.state?.state === 'sleeping';
   sleep.update(asleep);
 
-  const name = brewing ? 'brewing' : (S.view === 'review' && !S.review ? 'home' : S.view);
-  setAttr(app, 'data-screen', name);
-  if (current !== name) {
-    current = name;
-    main.replaceChildren(screen(name).el);
-    main.scrollTop = 0;
+  const name = sheets[S.view] ? S.view : null;
+  setAttr(app, 'data-screen', S.shot || S.review ? 'shot' : (name || 'home'));
+  setAttr(historyBtn, 'aria-current', name === 'history' ? 'page' : null);
+  setAttr(settingsBtn, 'aria-current', name === 'settings' ? 'page' : null);
+  if (name !== currentSheet) {
+    currentSheet = name;
+    show(sheetLayer, Boolean(name));
+    if (name) {
+      sheetBox.replaceChildren(sheet(name).el);
+      sheetBox.scrollTop = 0;
+    } else {
+      sheetBox.replaceChildren();
+    }
   }
-  NAV.forEach((item, i) => {
-    const active = item.view === name || (name === 'review' && item.view === 'home') || (name === 'recipe' && item.view === 'recipes');
-    setAttr(navButtons[i], 'aria-current', active ? 'page' : null);
-  });
-  setAttr(settingsButton, 'aria-current', name === 'settings' ? 'page' : null);
-  screen(name).update();
+  home.update();
+  if (name) sheet(name).update();
+  shot.update();
+  utility.update();
+  ruler.update();
   dialogs.update();
 
   show(toastEl, Boolean(S.toast));
@@ -175,9 +192,13 @@ async function start(demo) {
 }
 
 document.addEventListener('pointerdown', heartbeat, { passive: true });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (S.editor) closeEditor(); else if (sheets[S.view]) go('home');
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && (S.mode === 'live' || S.mode === 'demo')) loadAll();
 });
 
-if (forcedDemo) demoPanel.lastElementChild.hidden = true;
+if (forcedDemo) leaveButton.hidden = true;
 start(params.has('demo') || forcedDemo);

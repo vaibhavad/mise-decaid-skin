@@ -90,6 +90,8 @@ export function stepsAtTemp(profile, target) {
 }
 
 // Turn a stored shot's measurements into chart samples and a short summary.
+// A sample: t seconds, p pressure, f flow, tp/tf targets, c water temperature,
+// s step index, w weight in the cup (null without a scale).
 export function summarizeShot(shot) {
   const samples = [];
   let t0 = null;
@@ -103,12 +105,54 @@ export function summarizeShot(shot) {
     if (t0 === null) t0 = ts;
     const weight = Number.isFinite(Number(m.scale?.weight)) ? Number(m.scale.weight) : null;
     if (weight !== null) lastWeight = weight;
-    samples.push({ t: (ts - t0) / 1000, p: Number(machine.pressure) || 0, f: Number(machine.flow) || 0, w: weight });
+    samples.push(sampleFrom(machine, (ts - t0) / 1000, weight));
   }
   const mise = shot?.annotations?.extras?.mise || {};
   const seconds = samples.length ? samples[samples.length - 1].t : (Number(mise.seconds) || null);
   const out = Number(shot?.annotations?.actualYield) || Number(mise.out) || lastWeight || null;
   return { samples, seconds, out };
+}
+
+export function sampleFrom(m, t, w) {
+  const num0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  return {
+    t, p: Number(m.pressure) || 0, f: Number(m.flow) || 0,
+    tp: num0(m.targetPressure), tf: num0(m.targetFlow),
+    c: num0(m.mixTemperature), s: Number(m.profileFrame) || 0, w,
+  };
+}
+
+// What happened in each step of a shot, from its samples.
+export function stageStats(samples, steps = []) {
+  const stages = [];
+  let cur = null;
+  let lastW = 0;
+  for (const x of samples || []) {
+    if (!cur || x.s !== cur.index) {
+      if (cur) stages.push(cur);
+      cur = { index: x.s, name: steps[x.s]?.name || `Step ${x.s + 1}`, start: x.t, end: x.t, w0: x.w ?? lastW, w1: x.w ?? lastW, cMin: Infinity, cMax: -Infinity, pFirst: x.p, pPeak: x.p, pLast: x.p, pump: steps[x.s]?.pump || 'flow' };
+    }
+    cur.end = x.t;
+    if (x.w != null) { cur.w1 = x.w; lastW = x.w; }
+    if (x.c != null) { cur.cMin = Math.min(cur.cMin, x.c); cur.cMax = Math.max(cur.cMax, x.c); }
+    cur.pPeak = Math.max(cur.pPeak, x.p);
+    cur.pLast = x.p;
+  }
+  if (cur) stages.push(cur);
+  return stages.map((st) => ({ ...st, seconds: Math.max(0, st.end - st.start), grams: Math.max(0, (st.w1 ?? 0) - (st.w0 ?? 0)) }));
+}
+
+// ── Temperature unit ─────────────────────────────────────────────────────
+// Everything is stored in °C; the screen can show °F.
+let unitF = false;
+export function setTempUnit(unit) { unitF = unit === 'f'; }
+export function tempUnit() { return unitF ? 'f' : 'c'; }
+export function toShown(c) { return unitF ? c * 9 / 5 + 32 : c; }
+export function fromShown(v) { return unitF ? (v - 32) * 5 / 9 : v; }
+export function deg(c, digits = 0) {
+  if (!Number.isFinite(Number(c))) return '–';
+  const v = toShown(Number(c));
+  return `${digits ? trimNum(Math.round(v * 10 ** digits) / 10 ** digits) : Math.round(v)}°`;
 }
 
 export const TASTES = ['Sour', 'A bit sour', 'Just right', 'A bit bitter', 'Bitter'];

@@ -1,13 +1,41 @@
 // Settings, in Mise's own look. It covers the everyday choices; the link at
 // the end opens Decaid's complete settings page for everything else.
 
-import { h, setText, show } from '../dom.js';
+import { h, setText, show, setAttr, replaceKids, icon } from '../dom.js';
 import {
   S, updateSettings, updatePresence, setBrightness, setSteam, setCleanInterval,
-  openDecaidSettings, gatewayMode, openCity, setWeatherUnit,
+  openDecaidSettings, gatewayMode, openCity, setWeatherUnit, updateLayout, moveCard, toggleCard,
 } from '../store.js';
-import { num, clamp } from '../format.js';
-import { toggleRow, choiceRow, numberRow, card } from './parts.js';
+import { num, clamp, deg } from '../format.js';
+import { toggleRow, choiceRow, numberRow, card, sheetHead } from './parts.js';
+
+const CARD_NAMES = { hotWater: 'Hot water', steam: 'Steam', flush: 'Flush and cleaning', scale: 'Scale' };
+
+// Which cards the Brew screen shows, and in what order.
+function homeCards() {
+  const list = h('div', { class: 'card-order' });
+  let key = '';
+  return {
+    el: list,
+    update() {
+      const k = `${S.layout.cards.join(',')}|${S.layout.hidden.join(',')}`;
+      if (k === key) return;
+      key = k;
+      const cards = S.layout.cards;
+      replaceKids(list, cards.map((c, i) => {
+        const on = !S.layout.hidden.includes(c);
+        const sw = h('button', { class: 'switch', type: 'button', role: 'switch', 'aria-checked': on ? 'true' : 'false', 'aria-label': `Show ${CARD_NAMES[c]}`, onClick: () => toggleCard(c) },
+          h('span', { class: 'switch-knob', 'aria-hidden': 'true' }));
+        return h('div', { class: 'order-row', 'data-off': on ? null : 'true' },
+          h('span', { class: 'set-label', text: CARD_NAMES[c] }),
+          h('span', { class: 'order-btns' },
+            h('button', { class: 'icon-btn icon-btn-small', type: 'button', 'aria-label': `Move ${CARD_NAMES[c]} up`, disabled: i === 0, onClick: () => moveCard(c, -1) }, icon('up')),
+            h('button', { class: 'icon-btn icon-btn-small', type: 'button', 'aria-label': `Move ${CARD_NAMES[c]} down`, disabled: i === cards.length - 1, onClick: () => moveCard(c, 1) }, icon('down')),
+            sw));
+      }));
+    },
+  };
+}
 
 const MODE_HINTS = {
   tracking: 'Best for Mise. Decaid weighs the shot, stops it at your target and saves it to History, while Mise shows it.',
@@ -55,7 +83,7 @@ export function createSettings() {
       less: 'Lower steam temperature', more: 'Higher steam temperature',
       read: () => (steam() && Number(steam().targetTemperature) > 0 ? steam().targetTemperature : (steam() ? lastSteamTemp : null)),
       write: (v) => setSteam({ targetTemperature: clamp(Math.round(v), 130, 170) }),
-      step: 1, format: (v) => `${num(v, 0)} °C`,
+      step: 1, format: (v) => deg(v),
       enabled: () => Number(steam()?.targetTemperature) > 0,
     }),
     steamFlow: numberRow({
@@ -112,18 +140,34 @@ export function createSettings() {
     read: () => (S.place ? S.place.unit || 'c' : null), write: setWeatherUnit,
   });
 
+  rows.unit = choiceRow({
+    label: 'Temperatures', hint: 'How Mise shows temperatures. The machine always works in °C.',
+    options: [{ label: '°C', value: 'c' }, { label: '°F', value: 'f' }],
+    read: () => S.layout.unit, write: (v) => updateLayout({ unit: v }),
+  });
+  rows.tank = toggleRow({ label: 'Water tank gauge', hint: 'The coloured bar on the left of the Brew screen.', read: () => S.layout.tank !== false, write: (v) => updateLayout({ tank: v }) });
+  rows.last = toggleRow({ label: 'Last shot', hint: 'The strip under the recipes.', read: () => S.layout.last !== false, write: (v) => updateLayout({ last: v }) });
+  rows.screenOff = numberRow({
+    label: 'Screen off after', hint: 'While the machine sleeps, the clock goes dark after this long. Tap to bring it back.',
+    less: 'Sooner', more: 'Later', read: () => S.layout.screenOff || 0,
+    write: (v) => updateLayout({ screenOff: clamp(Math.round(v / 5) * 5, 0, 120) }),
+    step: 5, format: (v) => (v > 0 ? `${num(v, 0)} min` : 'Never'),
+  });
+  const cardsList = homeCards();
+
   const unavailable = h('p', { class: 'set-note', text: 'Decaid\'s settings could not be read just now, so some switches are greyed out.' });
   const versions = h('span', { class: 'muted small' });
 
-  const el = h('div', { class: 'view view-settings' },
-    h('header', { class: 'page-head' },
-      h('div', { class: 'page-head-text' }, h('h1', { class: 'page-title', text: 'Settings' }),
-        h('span', { class: 'page-sub', text: 'Changes are saved as you make them.' }))),
+  const el = h('div', { class: 'sheet-body view-settings' },
+    sheetHead({ title: 'Settings', sub: 'Changes are saved as you make them.' }).el,
     h('div', { class: 'settings-body' },
       h('div', { class: 'settings-col' },
+        card('set-card', h('h2', { class: 'card-title', text: 'Brew screen' }),
+          h('p', { class: 'set-hint', text: 'Show, hide and order the cards beside your recipes.' }),
+          cardsList.el, rows.tank.el, rows.last.el, rows.unit.el),
         card('set-card', h('h2', { class: 'card-title', text: 'Shots' }), unavailable,
           rows.mode.el, rows.needScale.el, rows.lockTare.el, rows.waterWeight.el),
-        card('set-card', h('h2', { class: 'card-title', text: 'Sleep screen' }), cityRow, rows.weatherUnit.el),
+        card('set-card', h('h2', { class: 'card-title', text: 'Sleep screen' }), cityRow, rows.weatherUnit.el, rows.screenOff.el),
         card('set-card', h('h2', { class: 'card-title', text: 'Mise' }), rows.cleanEvery.el,
           h('div', { class: 'set-row' },
             h('div', { class: 'set-text' },
@@ -141,6 +185,7 @@ export function createSettings() {
     const t = Number(steam()?.targetTemperature);
     if (t > 0) lastSteamTemp = t;
     for (const r of Object.values(rows)) r.update();
+    cardsList.update();
     show(unavailable, !S.settings);
     setText(cityHint, S.place
       ? `${[S.place.name, S.place.region].filter(Boolean).join(', ')}. The sleep screen shows its weather.`

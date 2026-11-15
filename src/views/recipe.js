@@ -8,18 +8,11 @@ import {
   loadRecipe, selectShot,
 } from '../store.js';
 import {
-  num, trimNum, ratio, when, cap, brewTemp, stepControl, stepEnds, stepLimit,
+  num, trimNum, ratio, when, cap, brewTemp, stepControl, stepEnds, stepLimit, deg,
 } from '../format.js';
 import { profileChart } from '../chart.js';
-import { card } from './parts.js';
-
-function kindOf(profile) {
-  const type = String(profile.beverage_type || 'espresso').toLowerCase();
-  const title = String(profile.title || '').toLowerCase();
-  if (type === 'cleaning' || type === 'calibrate' || /clean|descale|flush/.test(title)) return 'Cleaning';
-  if (type === 'pourover' || /tea|filter|pour.?over/.test(title)) return 'Filter and tea';
-  return 'Espresso';
-}
+import { card, sheetHead } from './parts.js';
+import { kind as kindOf } from './recipes.js';
 
 function stepItem(step, i) {
   const seconds = Number(step.seconds) || 0;
@@ -33,18 +26,18 @@ function stepItem(step, i) {
     h('div', { class: 'step-text' },
       h('div', { class: 'step-top' },
         h('strong', { text: cap(step.name || `Step ${i + 1}`) }),
-        Number.isFinite(temp) && temp > 0 ? h('span', { class: 'step-temp', text: `${trimNum(Math.round(temp * 10) / 10)} °C` }) : null),
+        Number.isFinite(temp) && temp > 0 ? h('span', { class: 'step-temp', text: deg(temp, 1) }) : null),
       h('span', { text: [stepControl(step), limit].filter(Boolean).join(' · ') }),
       timing ? h('span', { class: 'muted', text: timing }) : null));
 }
 
 export function createRecipe() {
-  const back = h('button', { class: 'link back-link', type: 'button', onClick: () => go('recipes') }, h('span', { 'aria-hidden': 'true', text: '‹ ' }), 'All recipes');
-  const title = h('h1', { class: 'page-title' });
-  const tags = h('div', { class: 'tags tags-head' });
   const star = h('button', { class: 'btn btn-outline btn-small btn-icon', type: 'button' }, icon('star', 'icon icon-star'), h('span'));
   const rename = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Rename' });
   const dup = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Duplicate' });
+  const tags = h('div', { class: 'tags tags-head' });
+  const head = sheetHead({ title: 'Recipe', back: { label: 'All recipes', onClick: () => go('recipes') }, right: [tags, star, rename, dup] });
+  const title = head.titleEl;
 
   const chartBox = h('div', { class: 'profile-chart-box' });
   const steps = h('ol', { class: 'step-list' });
@@ -70,11 +63,7 @@ export function createRecipe() {
         h('div', { class: 'notes-box' }, h('span', { class: 'label', text: 'Recent shots' }), shotsBox)),
       h('div', { class: 'load-box' }, load, loadHint)));
 
-  const el = h('div', { class: 'view view-recipe' },
-    h('header', { class: 'page-head' },
-      h('div', { class: 'page-head-text' }, back, h('div', { class: 'title-row' }, title, tags)),
-      h('div', { class: 'head-actions' }, star, rename, dup)),
-    body, missing);
+  const el = h('div', { class: 'sheet-body view-recipe' }, head.el, body, missing);
 
   let key = '';
   let record = null;
@@ -121,7 +110,7 @@ export function createRecipe() {
     setText(loadHint, inUse ? 'This recipe is already on the Brew screen.' : 'Puts it on the Brew screen, ready for your next shot.');
 
     const shotKey = (S.shots || []).slice(0, 40).map((s) => s.id).join(',');
-    const next = `${record.id}|${nameOf(record)}|${inUse}|${JSON.stringify(p.steps)}|${record.dose}|${record.out}|${record.grind}|${shotKey}|${Object.keys(S.shotDetails).length}`;
+    const next = `${record.id}|${nameOf(record)}|${inUse}|${JSON.stringify(p.steps)}|${record.dose}|${record.out}|${record.grind}|${shotKey}|${Object.keys(S.shotDetails).length}|${S.layout.unit}`;
     if (next === key) return;
     key = next;
 
@@ -142,7 +131,7 @@ export function createRecipe() {
     const temp = brewTemp(p);
     const rows = [
       fact('Espresso out', out > 0 ? `${num(out, 0)} g` : 'No stop by weight'),
-      fact('Temperature', Number.isFinite(temp) ? `${trimNum(Math.round(temp * 10) / 10)} °C` : '–'),
+      fact('Temperature', Number.isFinite(temp) ? deg(temp, 1) : '–'),
     ];
     if (dose) rows.push(fact('Coffee in', `${num(dose, 1)} g`));
     if (dose && out > 0) rows.push(fact('Ratio', ratio(dose, out)));

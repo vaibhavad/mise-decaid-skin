@@ -218,7 +218,7 @@ export function createSim(options = {}) {
         if (Math.round(t * 10) % 2) continue;
         const ts = iso(start + t * 1000);
         measurements.push({
-          machine: { timestamp: ts, state: { state: 'espresso', substate: s.substate }, flow: s.flow, pressure: s.pressure, mixTemperature: s.temperature, profileFrame: s.frame },
+          machine: { timestamp: ts, state: { state: 'espresso', substate: s.substate }, flow: s.flow, pressure: s.pressure, mixTemperature: s.temperature, profileFrame: s.frame, targetPressure: s.targetPressure, targetFlow: s.targetFlow },
           scale: { timestamp: ts, weight: s.weight, weightFlow: s.weightFlow },
           volume: sim.volume,
         });

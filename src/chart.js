@@ -3,19 +3,24 @@
 
 import { h, setAttr, replaceKids } from './dom.js';
 
-const PAD = { left: 40, right: 46, top: 14, bottom: 28 };
+const PAD = { left: 40, right: 50, top: 26, bottom: 28 };
 
+// Shot chart: pressure (green), flow (blue) and weight in the cup (brown),
+// with the recipe's targets dashed and numbered markers where each step
+// starts. A second shot can be laid underneath, faint, to compare.
 export function createChart({ width = 800, height = 430, live = false } = {}) {
   const W = width;
   const plotW = W - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
   const grid = h('g', { class: 'chart-grid' });
+  const marks = h('g', { class: 'chart-steps' });
   const targetLine = h('line', { class: 'chart-target', x1: 0, x2: plotW });
   const targetText = h('text', { class: 'chart-target-label', x: plotW - 6, 'text-anchor': 'end' });
+  const path = (cls) => h('path', { class: cls });
+  const ghost = { p: path('line ghost line-pressure'), f: path('line ghost line-flow'), w: path('line ghost line-weight') };
   const paths = {
-    p: h('path', { class: 'line line-pressure' }),
-    f: h('path', { class: 'line line-flow' }),
-    w: h('path', { class: 'line line-weight' }),
+    tp: path('line target line-pressure'), tf: path('line target line-flow'),
+    p: path('line line-pressure'), f: path('line line-flow'), w: path('line line-weight'),
   };
   const dots = {
     p: h('circle', { class: 'dot dot-pressure', r: 5 }),
@@ -25,63 +30,84 @@ export function createChart({ width = 800, height = 430, live = false } = {}) {
   const now = h('line', { class: 'chart-now', y1: 0, y2: plotH });
   const el = h('svg', { class: 'chart', viewBox: `0 0 ${W} ${height}`, role: 'img', preserveAspectRatio: 'xMidYMid meet' },
     h('g', { transform: `translate(${PAD.left} ${PAD.top})` },
-      grid, targetLine, targetText, paths.p, paths.f, paths.w,
+      grid, marks, targetLine, targetText, ghost.p, ghost.f, ghost.w,
+      paths.tp, paths.tf, paths.p, paths.f, paths.w,
       live ? [now, dots.p, dots.f, dots.w] : null));
 
   let scaleKey = '';
 
-  function draw({ samples = [], target = 0 } = {}) {
+  function draw({ samples = [], target = 0, compare = null, minSeconds = 30 } = {}) {
     let maxP = 0;
     let maxW = 0;
     let lastT = 0;
-    for (const s of samples) {
-      if (s.p > maxP) maxP = s.p;
-      if (s.f > maxP) maxP = s.f;
-      if (s.w != null && s.w > maxW) maxW = s.w;
-      lastT = s.t;
+    for (const list of [samples, compare || []]) {
+      for (const x of list) {
+        maxP = Math.max(maxP, x.p, x.f, x.tp || 0, x.tf || 0);
+        if (x.w != null) maxW = Math.max(maxW, x.w);
+        lastT = Math.max(lastT, x.t);
+      }
     }
-    const yMax = Math.max(10, Math.ceil(maxP / 2) * 2);
-    const wMax = Math.max(50, Math.ceil(Math.max(target * 1.2, maxW * 1.08) / 25) * 25);
-    const tMax = Math.max(30, Math.ceil((lastT + 2) / 10) * 10);
+    const yMax = Math.max(10, Math.ceil(Math.min(maxP, 16) / 2) * 2);
+    const rows = yMax / 2;
+    const wStep = rows * 5;
+    const wMax = Math.max(wStep * 2, Math.ceil(Math.max(target * 1.15, maxW * 1.05) / wStep) * wStep);
+    const tMax = Math.max(minSeconds, Math.ceil((lastT + 2) / 5) * 5);
     const x = (t) => (t / tMax) * plotW;
-    const y = (v) => plotH - (Math.min(v, yMax) / yMax) * plotH;
-    const yw = (v) => plotH - (Math.min(v, wMax) / wMax) * plotH;
+    const y = (v) => plotH - (Math.min(Math.max(v, 0), yMax) / yMax) * plotH;
+    const yw = (v) => plotH - (Math.min(Math.max(v, 0), wMax) / wMax) * plotH;
 
     const key = `${yMax}|${wMax}|${tMax}`;
     if (key !== scaleKey) {
       scaleKey = key;
       const kids = [];
-      const rows = 5;
       for (let i = 0; i <= rows; i += 1) {
         const yy = plotH - (i / rows) * plotH;
         kids.push(h('line', { class: i === 0 ? 'axis' : 'gridline', x1: 0, x2: plotW, y1: yy, y2: yy }));
         kids.push(h('text', { class: 'tick', x: -8, y: yy + 4.5, 'text-anchor': 'end', text: String(Math.round((yMax * i) / rows)) }));
         kids.push(h('text', { class: 'tick tick-weight', x: plotW + 8, y: yy + 4.5, text: i === rows ? `${Math.round(wMax)} g` : String(Math.round((wMax * i) / rows)) }));
       }
-      const every = tMax <= 40 && W >= 700 ? 5 : 10;
+      const every = tMax <= 45 ? 5 : 10;
       for (let t = 0; t <= tMax; t += every) {
         kids.push(h('text', { class: 'tick', x: x(t), y: plotH + 20, 'text-anchor': 'middle', text: t === tMax ? `${t} s` : String(t) }));
       }
       replaceKids(grid, kids);
     }
 
-    let dp = '';
-    let df = '';
-    let dw = '';
-    let weightStarted = false;
-    for (let i = 0; i < samples.length; i += 1) {
-      const s = samples[i];
-      const xx = x(s.t).toFixed(1);
-      dp += `${i ? 'L' : 'M'}${xx},${y(s.p).toFixed(1)}`;
-      df += `${i ? 'L' : 'M'}${xx},${y(s.f).toFixed(1)}`;
-      if (s.w != null) {
-        dw += `${weightStarted ? 'L' : 'M'}${xx},${yw(Math.max(0, s.w)).toFixed(1)}`;
-        weightStarted = true;
+    const line = (list, get, scale) => {
+      let d = '';
+      let open = false;
+      for (const s of list) {
+        const v = get(s);
+        if (v == null) { open = false; continue; }
+        d += `${open ? 'L' : 'M'}${x(s.t).toFixed(1)},${scale(v).toFixed(1)}`;
+        open = true;
       }
+      return d || null;
+    };
+    setAttr(paths.p, 'd', line(samples, (s) => s.p, y));
+    setAttr(paths.f, 'd', line(samples, (s) => s.f, y));
+    setAttr(paths.w, 'd', line(samples, (s) => (s.w == null ? null : s.w), yw));
+    setAttr(paths.tp, 'd', line(samples, (s) => (s.tp > 0 ? s.tp : null), y));
+    setAttr(paths.tf, 'd', line(samples, (s) => (s.tf > 0 ? s.tf : null), y));
+    const cmp = compare || [];
+    setAttr(ghost.p, 'd', line(cmp, (s) => s.p, y));
+    setAttr(ghost.f, 'd', line(cmp, (s) => s.f, y));
+    setAttr(ghost.w, 'd', line(cmp, (s) => (s.w == null ? null : s.w), yw));
+
+    // Numbered markers where each step begins.
+    const edges = [];
+    let prev = null;
+    for (const s of samples) {
+      if (s.s !== prev) { edges.push({ t: s.t, n: s.s + 1 }); prev = s.s; }
     }
-    setAttr(paths.p, 'd', dp || null);
-    setAttr(paths.f, 'd', df || null);
-    setAttr(paths.w, 'd', dw || null);
+    const markKey = `${edges.map((e) => `${e.n}@${e.t.toFixed(1)}`).join(',')}|${tMax}`;
+    if (marks.__key !== markKey) {
+      marks.__key = markKey;
+      replaceKids(marks, edges.map((e) => h('g', null,
+        e.t > 0.3 ? h('line', { class: 'step-edge', x1: x(e.t), x2: x(e.t), y1: 0, y2: plotH }) : null,
+        h('circle', { class: 'step-dot', cx: x(e.t) + 9, cy: -13, r: 9 }),
+        h('text', { class: 'step-dot-num', x: x(e.t) + 9, y: -9, 'text-anchor': 'middle', text: String(e.n) }))));
+    }
 
     const showTarget = target > 0;
     setAttr(targetLine, 'visibility', showTarget ? 'visible' : 'hidden');
@@ -104,7 +130,7 @@ export function createChart({ width = 800, height = 430, live = false } = {}) {
         setAttr(now, 'x2', lx);
         setAttr(dots.p, 'cx', lx); setAttr(dots.p, 'cy', y(last.p));
         setAttr(dots.f, 'cx', lx); setAttr(dots.f, 'cy', y(last.f));
-        setAttr(dots.w, 'cx', lx); setAttr(dots.w, 'cy', yw(Math.max(0, last.w ?? 0)));
+        setAttr(dots.w, 'cx', lx); setAttr(dots.w, 'cy', yw(last.w ?? 0));
         setAttr(dots.w, 'visibility', last.w == null ? 'hidden' : 'visible');
       }
     }
