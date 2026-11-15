@@ -188,3 +188,59 @@ export function miniChart() {
   }
   return { el, draw };
 }
+
+// The recipe's shape at full size, for the recipe page: one band per step,
+// numbered to match the step list, with pressure and flow on a shared scale.
+// Long steps are drawn shorter so the early, busy part of a recipe stays
+// readable; the width of a band is a guide, not a clock.
+export function profileChart(profile, { width = 760, height = 250 } = {}) {
+  const steps = Array.isArray(profile?.steps) ? profile.steps : [];
+  const pad = { left: 34, right: 12, top: 30, bottom: 12 };
+  const pw = width - pad.left - pad.right;
+  const ph = height - pad.top - pad.bottom;
+  const durations = steps.map((s) => Math.max(3, Math.min(Number(s.seconds) || 0, 25)));
+  const total = durations.reduce((a, b) => a + b, 0) || 1;
+  let yMax = 10;
+  for (const s of steps) yMax = Math.max(yMax, Number(s.pressure) || 0, Number(s.flow) || 0);
+  yMax = Math.ceil(yMax / 2) * 2;
+  const y = (v) => ph - (Math.min(Math.max(v, 0), yMax) / yMax) * ph;
+
+  const grid = [];
+  for (let v = 0; v <= yMax; v += 2) {
+    grid.push(h('line', { class: v === 0 ? 'axis' : 'gridline', x1: 0, x2: pw, y1: y(v), y2: y(v) }));
+    grid.push(h('text', { class: 'tick', x: -8, y: y(v) + 4.5, 'text-anchor': 'end', text: String(v) }));
+  }
+  const bands = [];
+  let dp = '';
+  let df = '';
+  let t = 0;
+  let lastP = null;
+  let lastF = null;
+  steps.forEach((s, i) => {
+    const x0 = (t / total) * pw;
+    t += durations[i];
+    const x1 = (t / total) * pw;
+    if (i % 2 === 0) bands.push(h('rect', { class: 'step-band', x: x0, y: 0, width: x1 - x0, height: ph }));
+    if (i) bands.push(h('line', { class: 'step-edge', x1: x0, x2: x0, y1: 0, y2: ph }));
+    bands.push(h('text', { class: 'step-num', x: (x0 + x1) / 2, y: -10, 'text-anchor': 'middle', text: String(i + 1) }));
+    const smooth = s.transition === 'smooth';
+    if (s.pump === 'pressure') {
+      const v = y(Number(s.pressure) || 0);
+      dp += lastP === null ? `M${x0.toFixed(1)},${v.toFixed(1)}` : (smooth ? '' : `L${x0.toFixed(1)},${v.toFixed(1)}`);
+      dp += `L${x1.toFixed(1)},${v.toFixed(1)}`;
+      lastP = v;
+      lastF = null;
+    } else {
+      const v = y(Number(s.flow) || 0);
+      df += lastF === null ? `M${x0.toFixed(1)},${v.toFixed(1)}` : (smooth ? '' : `L${x0.toFixed(1)},${v.toFixed(1)}`);
+      df += `L${x1.toFixed(1)},${v.toFixed(1)}`;
+      lastF = v;
+      lastP = null;
+    }
+  });
+  return h('svg', { class: 'profile-chart', viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'The shape of this recipe', preserveAspectRatio: 'xMidYMid meet' },
+    h('g', { transform: `translate(${pad.left} ${pad.top})` },
+      bands, grid,
+      dp ? h('path', { class: 'line line-pressure', d: dp }) : null,
+      df ? h('path', { class: 'line line-flow', d: df }) : null));
+}

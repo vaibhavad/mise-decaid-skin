@@ -507,6 +507,13 @@ export function createSim(options = {}) {
       }
     },
     setGhc(value) { machine.ghc = Boolean(value); },
+    // Steps the tank through full, half, low and empty.
+    cycleWater() {
+      const levels = [62, 30, 16, 8];
+      const i = levels.indexOf(machine.water);
+      machine.water = levels[(i + 1) % levels.length];
+      publish('/ws/v1/machine/waterLevels', { currentLevel: machine.water, refillLevel: machine.refill });
+    },
     get ghc() { return machine.ghc; },
   };
 }

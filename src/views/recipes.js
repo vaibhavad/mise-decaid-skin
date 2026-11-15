@@ -1,8 +1,8 @@
 // Recipes: every profile on the machine, described in plain words. Tap one to
-// use it; star up to five to keep them on the Brew screen.
+// see it in full and load it; star up to five to keep them on the Brew screen.
 
 import { h, setAttr, replaceKids, icon } from '../dom.js';
-import { S, visibleProfiles, favoriteIds, toggleFavorite, useProfile, isInUse, nameOf, openRename } from '../store.js';
+import { S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, openRename } from '../store.js';
 import { firstSentence } from '../format.js';
 import { profileCurve } from '../chart.js';
 
@@ -45,7 +45,7 @@ export function createRecipes() {
     const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${query}|${titles}`;
     if (next === key) return;
     key = next;
-    count.textContent = 'Tap a recipe to use it. Star up to five for the Brew screen. The pencil renames or duplicates one.';
+    count.textContent = 'Tap a recipe to see it in full and load it. Star up to five for the Brew screen.';
 
     if (!S.profiles) {
       replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]);
@@ -68,7 +68,7 @@ export function createRecipes() {
       const starred = favs.includes(record.id);
       const inUse = isInUse(record);
       return h('article', { class: 'recipe', 'data-in-use': inUse ? 'true' : null },
-        h('button', { class: 'recipe-main', type: 'button', onClick: () => useProfile(record) },
+        h('button', { class: 'recipe-main', type: 'button', onClick: () => openRecipe(record.id) },
           profileCurve(p),
           h('span', { class: 'recipe-card-title', text: nameOf(record) }),
           h('span', { class: 'recipe-card-text muted', text: firstSentence(p.notes, 120) || 'No description.' }),

@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.3.0.zip`.
+   **Install skin → ZIP file** and pick `mise-0.4.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -22,6 +22,24 @@ in Mise under Settings > Shots. In **Disabled** mode Decaid shows its own shot
 screen in place of Mise's; in **Full** mode nothing stops the shot at the
 target weight, because Mise does not do that itself.
 
+## Recipes
+
+Tap a recipe in **Recipes** to open its page: its shape, every step in plain
+words (what the pump does, the temperature, and when the step ends), the
+numbers it aims for, its description and the last few shots pulled with it.
+**Load this recipe** puts it on the Brew screen and takes you there. Star,
+Rename and Duplicate are on the same page. **Details** on the Brew screen opens
+the page for the recipe in use.
+
+## Water tank
+
+The water tank reading at the top of the screen shows how much water is left,
+in millilitres or litres, with a small tank that fills and changes colour:
+green for high (over about 1.1 L), amber for medium, red for low (under about
+500 ml) and a blinking red tank when it needs refilling. The machine reports
+the level in millimetres; Mise converts it with the same table as the original
+Decent app, so a full tank reads about 2 L.
+
 ## Settings and recipe names
 
 Settings has Mise's own page for the everyday choices (gateway mode, scale
@@ -34,7 +52,7 @@ is kept by Mise (key-value store, `mise/names`) and shown only in Mise.
 
 ## Your own copies of recipes
 
-**Duplicate** (on the Brew screen, or behind the pencil on a recipe card) makes
+**Duplicate** (on the Brew screen, on a recipe's page, or behind the pencil on a recipe card) makes
 your own copy of a recipe and switches to it. While a copy is in use, the dose,
 yield, temperature and grinder setting you change on the Brew screen are saved
 to the copy; the original is never touched. Switching back to a copy restores

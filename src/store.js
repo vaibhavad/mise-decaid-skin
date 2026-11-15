@@ -1,7 +1,7 @@
 // Application state and every action that changes it. Views read `S` and are
 // told to refresh through subscribe(); they never talk to the gateway directly.
 
-import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot } from './format.js';
+import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot, tankMl, litres, TANK_ML } from './format.js';
 import { fetchWeather, searchPlaces, demoWeather, demoPlaces } from './weather.js';
 
 export const S = {
@@ -21,7 +21,8 @@ export const S = {
   shotDetails: {},           // id -> full record
   selectedShot: null,
   cleaning: { interval: 50, totalAtClean: null, cleanedAt: null },
-  view: 'home',              // home | recipes | water | history | review
+  view: 'home',              // home | recipes | recipe | water | history | review
+  recipeId: null,            // the recipe open in the detail page
   shot: null,                // live shot being pulled
   review: null,              // the shot that just finished
   saving: '',                // '' | saving | saved | error
@@ -551,6 +552,18 @@ async function backfillTimes() {
   }
 }
 
+// The full page for one recipe, and loading it from there.
+export function openRecipe(id) {
+  S.recipeId = id;
+  go('recipe');
+}
+
+export async function loadRecipe(record) {
+  S.view = 'home';
+  emit();
+  await useProfile(record, `Loaded ${nameOf(record)}`);
+}
+
 export function selectShot(id) {
   S.selectedShot = id;
   loadShotDetail(id);
@@ -592,13 +605,20 @@ function heatLine(group, target) {
   return target > 0 ? `${Math.round(group)} °C of ${Math.round(target)} °C` : `${Math.round(group)} °C`;
 }
 
+// How full the tank is, in millilitres and as one of four bands, each with
+// its own colour: high (green), medium (amber), low (red) and empty.
 export function waterLabel() {
   const w = S.water;
-  if (!w || typeof w.currentLevel !== 'number') return { text: '–', low: false };
+  if (!w || typeof w.currentLevel !== 'number') return { text: '–', level: null, word: '', pct: 0, low: false };
   const refill = Number(w.refillLevel) || 0;
-  if (w.currentLevel <= refill) return { text: 'Empty', low: true };
-  if (w.currentLevel <= refill + 8) return { text: 'Low', low: true };
-  return { text: 'OK', low: false };
+  const ml = tankMl(w.currentLevel);
+  const pct = Math.max(0, Math.min(1, ml / TANK_ML));
+  let level = 'high';
+  if (w.currentLevel <= refill) level = 'empty';
+  else if (ml < 500 || w.currentLevel <= refill + 6) level = 'low';
+  else if (ml < 1100) level = 'medium';
+  const word = { high: 'High', medium: 'Medium', low: 'Low', empty: 'Refill' }[level];
+  return { text: level === 'empty' ? 'Empty' : litres(ml), ml, level, word, pct, low: level === 'low' || level === 'empty' };
 }
 
 // ── Recipe names ─────────────────────────────────────────────────────────
@@ -655,6 +675,7 @@ export async function renameProfile(record, input) {
       });
       const next = updated?.profile ? updated : { ...record, profile: { ...record.profile, title: name } };
       S.profiles = (S.profiles || []).map((r) => (r.id === record.id ? next : r));
+      if (S.recipeId === record.id) S.recipeId = next.id;
       if (next.id !== record.id && Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
         S.favorites = S.favorites.map((id) => (id === record.id ? next.id : id));
         quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
@@ -841,6 +862,7 @@ export async function duplicateProfile(record, input) {
     quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
   }
   const made = visibleProfiles().find((r) => r.id === copy.id);
+  if (S.view === 'recipe') S.recipeId = copy.id;
   await useProfile(made, `Now using your copy, ${title}. Changes on the Brew screen are saved to it.`);
   return true;
 }
@@ -864,6 +886,7 @@ export function deleteCopy(record) {
     quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
   }
   toast(`Deleted your copy, ${record.profile.title}`);
+  if (S.view === 'recipe' && S.recipeId === record.id) S.view = 'recipes';
   emit();
 }
 

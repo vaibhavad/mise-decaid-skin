@@ -4,7 +4,7 @@ import { h, setText, setAttr, show, replaceKids } from '../dom.js';
 import {
   S, status, values, setDose, setOut, setTemp, setGrind, go, requestState, scan, transport,
   visibleProfiles, favoriteIds, useProfile, isInUse, cleaningDue, shotsSinceClean, selectShot,
-  displayTitle, nameOf, openRename, openDuplicate, copyInUse, gatewayMode,
+  displayTitle, nameOf, openRename, openDuplicate, openRecipe, copyInUse, gatewayMode,
 } from '../store.js';
 import { num, trimNum, ratio, firstSentence, when } from '../format.js';
 import { profileCurve, miniChart } from '../chart.js';
@@ -17,6 +17,7 @@ export function createHome() {
   const title = h('h2', { class: 'recipe-title' });
   const rename = h('button', { class: 'link link-inline', type: 'button', text: 'Rename' });
   const dup = h('button', { class: 'link link-inline', type: 'button', text: 'Duplicate' });
+  const details = h('button', { class: 'link link-inline', type: 'button', text: 'Details' });
   const copyTag = h('span', { class: 'pill pill-quiet', text: 'Your copy' });
   const coffee = h('span', { class: 'muted' });
   const curveBox = h('div', { class: 'recipe-curve' });
@@ -39,7 +40,7 @@ export function createHome() {
   const recipe = card('recipe-card',
     h('div', { class: 'recipe-top' },
       h('div', { class: 'recipe-name' },
-        h('div', { class: 'label-row' }, h('span', { class: 'label', text: 'Recipe' }), rename, dup, copyTag), title, coffee),
+        h('div', { class: 'label-row' }, h('span', { class: 'label', text: 'Recipe' }), details, rename, dup, copyTag), title, coffee),
       h('div', { class: 'recipe-shape' }, curveBox, blurb)),
     h('div', { class: 'stepper-grid' }, steppers.map((s) => s.el)),
     h('div', { class: 'ratio-line muted' }, h('span', { text: 'Ratio' }), ratioEl, h('span', { 'aria-hidden': 'true', text: '·' }), stopNote, saving),
@@ -162,6 +163,8 @@ export function createHome() {
     rename.onclick = current ? () => openRename(current) : null;
     show(dup, Boolean(current));
     dup.onclick = current ? () => openDuplicate(current) : null;
+    show(details, Boolean(current));
+    details.onclick = current ? () => openRecipe(current.id) : null;
     show(copyTag, copyInUse());
     const context = S.workflow?.context || {};
     setText(coffee, [context.coffeeName, context.coffeeRoaster].filter(Boolean).join(' · '));

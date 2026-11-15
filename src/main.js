@@ -11,13 +11,14 @@ import { createHome } from './views/home.js';
 import { createBrewing } from './views/brewing.js';
 import { createReview } from './views/review.js';
 import { createRecipes } from './views/recipes.js';
+import { createRecipe } from './views/recipe.js';
 import { createWater } from './views/water.js';
 import { createHistory } from './views/history.js';
 import { createSettings } from './views/settings.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 document.documentElement.dataset.miseVersion = VERSION;
 const app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
@@ -44,6 +45,7 @@ const demoPanel = h('div', { class: 'demo-panel', hidden: true },
   h('span', { class: 'muted', text: 'A pretend machine and scale. Nothing here reaches a real machine.' }),
   h('button', { class: 'btn btn-outline', type: 'button', onClick: () => { transport().press('espresso'); show(demoPanel, false); }, text: 'Press the espresso button' }),
   h('button', { class: 'btn btn-outline', type: 'button', onClick: toggleGhc, text: 'Group-head buttons: on' }),
+  h('button', { class: 'btn btn-outline', type: 'button', onClick: () => transport().cycleWater(), text: 'Change the water level' }),
   h('button', { class: 'btn btn-outline', type: 'button', onClick: leaveDemo, text: 'Leave the demo' }));
 const ghcButton = demoPanel.children[3];
 const demoBadge = h('button', { class: 'demo-badge', type: 'button', hidden: true, onClick: () => show(demoPanel, demoPanel.hasAttribute('hidden')), text: 'Demo' });
@@ -104,7 +106,7 @@ app.append(rail, main, cover, sleep.el, demoPanel, dialogs.el, toastEl);
 // ── Screens ──────────────────────────────────────────────────────────────
 
 const factories = {
-  home: createHome, recipes: createRecipes, water: createWater,
+  home: createHome, recipes: createRecipes, recipe: createRecipe, water: createWater,
   history: createHistory, review: createReview, brewing: createBrewing, settings: createSettings,
 };
 const screens = {};
@@ -145,7 +147,7 @@ function render() {
     main.scrollTop = 0;
   }
   NAV.forEach((item, i) => {
-    const active = item.view === name || (name === 'review' && item.view === 'home');
+    const active = item.view === name || (name === 'review' && item.view === 'home') || (name === 'recipe' && item.view === 'recipes');
     setAttr(navButtons[i], 'aria-current', active ? 'page' : null);
   });
   setAttr(settingsButton, 'aria-current', name === 'settings' ? 'page' : null);

@@ -112,3 +112,69 @@ export function summarizeShot(shot) {
 }
 
 export const TASTES = ['Sour', 'A bit sour', 'Just right', 'A bit bitter', 'Bitter'];
+
+// ── Water tank ───────────────────────────────────────────────────────────
+// The machine reports the water height in millimetres. This table turns that
+// into millilitres; it comes from the original Decent app (by way of the
+// Streamline skin), so every skin shows the same amount. Index = mm.
+const MM_TO_ML = [
+  0, 16, 43, 70, 97, 124, 151, 179, 206, 233,
+  261, 288, 316, 343, 371, 398, 426, 453, 481, 509,
+  537, 564, 592, 620, 648, 676, 704, 732, 760, 788,
+  816, 844, 872, 900, 929, 957, 985, 1013, 1042, 1070,
+  1104, 1138, 1172, 1207, 1242, 1277, 1312, 1347, 1382, 1417,
+  1453, 1488, 1523, 1559, 1594, 1630, 1665, 1701, 1736, 1772,
+  1808, 1843, 1879, 1915, 1951, 1986, 2022, 2058,
+];
+export const TANK_ML = MM_TO_ML[MM_TO_ML.length - 1];
+
+export function tankMl(mm) {
+  const value = Number(mm);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const i = Math.floor(value);
+  if (i >= MM_TO_ML.length - 1) return TANK_ML;
+  return Math.round(MM_TO_ML[i] + (MM_TO_ML[i + 1] - MM_TO_ML[i]) * (value - i));
+}
+
+export function litres(ml) {
+  if (ml >= 1000) return `${(Math.floor(ml / 100) / 10).toFixed(1)} L`;
+  return `${Math.round(ml / 10) * 10} ml`;
+}
+
+// ── Recipe steps in plain words ──────────────────────────────────────────
+
+const n = (v) => Number(v) || 0;
+
+export function stepControl(step) {
+  const smooth = step.transition === 'smooth';
+  if (step.pump === 'pressure') {
+    const bar = `${trimNum(roundTo(n(step.pressure), 0.1))} bar`;
+    return smooth ? `Pressure eases to ${bar}` : `Pressure at ${bar}`;
+  }
+  const flow = n(step.flow);
+  if (flow === 0) return 'Pause, no water flowing';
+  const ml = `${trimNum(roundTo(flow, 0.1))} ml/s`;
+  return smooth ? `Flow eases to ${ml}` : `Flow at ${ml}`;
+}
+
+// The ways a step can end early, besides its time running out.
+export function stepEnds(step) {
+  const ends = [];
+  const exit = step.exit;
+  if (exit && exit.type && n(exit.value) > 0) {
+    const unit = exit.type === 'pressure' ? 'bar' : 'ml/s';
+    const word = exit.condition === 'under' ? 'drops below' : 'rises above';
+    ends.push(`${exit.type} ${word} ${trimNum(roundTo(n(exit.value), 0.1))} ${unit}`);
+  }
+  if (n(step.weight) > 0) ends.push(`${trimNum(roundTo(n(step.weight), 0.1))} g is in the cup`);
+  if (n(step.volume) > 0) ends.push(`${Math.round(n(step.volume))} ml has gone through`);
+  return ends;
+}
+
+export function stepLimit(step) {
+  const value = n(step.limiter?.value);
+  if (value <= 0) return '';
+  return step.pump === 'pressure'
+    ? `Flow kept under ${trimNum(roundTo(value, 0.1))} ml/s`
+    : `Pressure kept under ${trimNum(roundTo(value, 0.1))} bar`;
+}

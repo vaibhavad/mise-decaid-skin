@@ -29,6 +29,7 @@
   --weight: #D9A066;
   --stop: #D13426;
   --warn: #F0C36A;
+  --low: #FF6F61;
   --head: 'Space Grotesk', 'Inter', system-ui, sans-serif;
 }
 
@@ -106,6 +107,20 @@ ol { list-style: none; }
 .chip-value { font-size: 1.125rem; font-weight: 600; }
 .chip[data-warn] { border-color: var(--warn); }
 .chip[data-warn] .chip-value { color: var(--warn); }
+/* Water tank: a little tank that fills, coloured by level. */
+.chip-water { flex-direction: row; align-items: center; gap: 0.7rem; min-width: 10.75rem; --level: var(--muted); }
+.chip-water[data-level='high'] { --level: var(--pressure); }
+.chip-water[data-level='medium'] { --level: var(--warn); }
+.chip-water[data-level='low'], .chip-water[data-level='empty'] { --level: var(--low); border-color: var(--low); }
+.chip-stack { display: flex; flex-direction: column; gap: 0.125rem; }
+.chip-line { display: flex; align-items: baseline; gap: 0.4rem; white-space: nowrap; }
+.chip-water .chip-value, .chip-word { color: var(--level); }
+.chip-word { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.tank { position: relative; flex: none; width: 1.05rem; height: 2.3rem; box-sizing: border-box; border: 0.14rem solid var(--level); border-radius: 0.2rem 0.2rem 0.35rem 0.35rem; overflow: hidden; }
+.tank-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--level); transition: height 0.6s ease; }
+.chip-water[data-level='empty'] .tank { animation: tank-blink 1.6s ease-in-out infinite; }
+@keyframes tank-blink { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .chip-water[data-level='empty'] .tank { animation: none; } .tank-fill { transition: none; } }
 .chip-button[disabled] { opacity: 1; }
 .chip-button[disabled] .chip-value { font-size: 0.875rem; color: var(--muted); }
 
@@ -278,6 +293,38 @@ ol { list-style: none; }
 .star[aria-pressed='true'] { color: var(--ink); }
 .star[aria-pressed='true'] .icon-star { fill: currentColor; }
 .empty { grid-column: 1 / -1; padding: 2rem 0; }
+
+/* ── One recipe ───────────────────────────────────────────────────────── */
+
+.back-link { align-self: flex-start; padding: 0.25rem 0 0.4rem; color: var(--muted); }
+.title-row { display: flex; align-items: center; gap: 0.875rem; min-width: 0; flex-wrap: wrap; }
+.tags-head { margin-top: 0; }
+.head-actions { display: flex; gap: 0.625rem; flex: none; }
+.btn-icon { display: inline-flex; align-items: center; gap: 0.4rem; }
+.btn-icon .icon { width: 1.25rem; height: 1.25rem; }
+.btn-icon[aria-pressed='true'] .icon-star { fill: currentColor; }
+.recipe-page { flex: 1; min-height: 0; display: flex; gap: 1.5rem; }
+.recipe-shape-card { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.75rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.shape-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.profile-chart { width: 100%; height: auto; max-height: 16rem; flex: none; }
+.profile-chart .step-band { fill: rgba(255, 255, 255, 0.035); }
+.profile-chart .step-edge { stroke: var(--line); stroke-dasharray: 3 4; }
+.profile-chart .step-num { font-size: 13px; font-weight: 700; fill: var(--muted); }
+.step-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.step { display: flex; gap: 0.875rem; align-items: flex-start; padding: 0.75rem 0.875rem; border-radius: 0.875rem; background: var(--raise); }
+.step-index { flex: none; width: 1.875rem; height: 1.875rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.875rem; font-weight: 700; color: var(--bg); background: var(--flow); }
+.step-index[data-pump='pressure'] { background: var(--pressure); }
+.step-text { flex: 1; display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; font-size: 0.9375rem; line-height: 1.35; }
+.step-top { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.step-temp { font-size: 0.875rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.recipe-aside { width: 25rem; flex: none; display: flex; flex-direction: column; gap: 1rem; min-height: 0; }
+.recipe-facts-card { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1.1rem; overscroll-behavior: contain; }
+.notes-box { display: flex; flex-direction: column; gap: 0.4rem; }
+.recipe-notes { font-size: 0.9375rem; line-height: 1.45; white-space: pre-line; }
+.recipe-shots { display: flex; flex-direction: column; gap: 0.4rem; }
+.mini-shot { display: flex; flex-direction: column; align-items: flex-start; gap: 0.125rem; padding: 0.6rem 0.875rem; border-radius: 0.75rem; border: 1px solid var(--line); background: transparent; font-size: 0.875rem; text-align: left; }
+.load-box { flex: none; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+.load-hint { text-align: center; }
 
 /* ── Milk and water ───────────────────────────────────────────────────── */
 

@@ -52,7 +52,18 @@ export function header({ title = null, sub = null, chips = ['group', 'water', 's
     } else {
       const labels = { group: 'Group', water: 'Water tank', steam: 'Steam' };
       chipEls[name] = valueEl;
-      chipEls[`${name}Box`] = h('div', { class: 'chip' }, h('span', { class: 'chip-label', text: labels[name] }), valueEl);
+      if (name === 'water') {
+        // A small tank that fills and changes colour with the level.
+        chipEls.tankFill = h('span', { class: 'tank-fill' });
+        chipEls.waterWord = h('span', { class: 'chip-word' });
+        chipEls[`${name}Box`] = h('div', { class: 'chip chip-water' },
+          h('span', { class: 'tank', 'aria-hidden': 'true' }, chipEls.tankFill),
+          h('span', { class: 'chip-stack' },
+            h('span', { class: 'chip-label', text: labels[name] }),
+            h('span', { class: 'chip-line' }, valueEl, chipEls.waterWord)));
+      } else {
+        chipEls[`${name}Box`] = h('div', { class: 'chip' }, h('span', { class: 'chip-label', text: labels[name] }), valueEl);
+      }
       chipRow.append(chipEls[`${name}Box`]);
     }
   }
@@ -73,7 +84,10 @@ export function header({ title = null, sub = null, chips = ['group', 'water', 's
     if (chipEls.water) {
       const water = waterLabel();
       setText(chipEls.water, water.text);
-      setAttr(chipEls.waterBox, 'data-warn', water.low);
+      setText(chipEls.waterWord, water.level && water.level !== 'empty' ? water.word : '');
+      setAttr(chipEls.waterBox, 'data-level', water.level);
+      setAttr(chipEls.waterBox, 'aria-label', water.level ? `Water tank: ${water.text}, ${water.word.toLowerCase()}` : 'Water tank: unknown');
+      chipEls.tankFill.style.height = `${Math.round(water.pct * 100)}%`;
     }
     if (chipEls.scale) {
       const on = S.scaleConnected && S.scale.weight != null;
