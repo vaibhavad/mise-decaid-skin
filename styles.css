@@ -740,3 +740,30 @@ html, body { overflow: hidden; }
 .toast { display: flex; align-items: center; gap: 0.9rem; }
 .toast[hidden] { display: none; }
 .toast-undo { min-height: 2.25rem; padding: 0 1rem; border-radius: 999px; border: 1px solid var(--bg); background: transparent; color: var(--bg); font-size: 0.875rem; font-weight: 700; }
+
+/* Step editor */
+.ed-name { width: 22rem; font-family: var(--head); font-size: 1.125rem; font-weight: 600; }
+.ed-body { flex: 1; min-height: 0; display: flex; gap: 1.25rem; }
+.ed-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.75rem; min-height: 0; }
+.ed-shape { flex: none; padding: 0.75rem 1rem 0.25rem; }
+.ed-chart .profile-chart { max-height: 11.5rem; }
+.ed-list-head { flex: none; display: flex; align-items: center; justify-content: space-between; }
+.ed-steps { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; overscroll-behavior: contain; }
+.ed-step { width: 100%; display: flex; align-items: center; gap: 0.875rem; padding: 0.7rem 0.9rem; border-radius: 1rem; border: 0.125rem solid transparent; background: var(--card); text-align: left; }
+.ed-step[aria-pressed='true'] { border-color: var(--ink); }
+.ed-step-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; font-size: 0.875rem; }
+.ed-step-text strong { font-size: 0.9375rem; }
+.ed-foot { flex: none; display: flex; gap: 0.75rem; align-items: stretch; }
+.ed-foot .ed-field { width: 11rem; flex: none; }
+.ed-notes { flex: 1; min-height: 0; height: 4.25rem; }
+.ed-detail { width: 30rem; flex: none; display: flex; flex-direction: column; gap: 0.9rem; overflow-y: auto; overscroll-behavior: contain; padding: 1.25rem; }
+.ed-detail-head { display: flex; align-items: center; justify-content: space-between; }
+.ed-tools { display: flex; align-items: center; gap: 0.4rem; }
+.ed-tools .btn-small { min-height: 2.5rem; padding: 0 0.9rem; }
+.ed-remove { color: var(--low); }
+.ed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.ed-field { display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; min-height: 4.25rem; padding: 0.6rem 0.9rem; border-radius: 1rem; border: none; background: var(--raise); text-align: left; }
+.ed-val { font-family: var(--head); font-size: 1.375rem; font-weight: 500; }
+.ed-choice { display: flex; flex-direction: column; gap: 0.4rem; }
+.ed-grid .ed-choice { padding: 0.5rem 0; }
+.ed-choice .seg-small { height: 2.75rem; min-height: 2.75rem; padding: 0 0.85rem; }

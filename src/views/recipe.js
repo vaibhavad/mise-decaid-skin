@@ -5,7 +5,7 @@
 import { h, setText, setAttr, show, replaceKids, icon } from '../dom.js';
 import {
   S, go, visibleProfiles, favoriteIds, toggleFavorite, isInUse, nameOf, openRename, openDuplicate,
-  loadRecipe, selectShot, findRecord, setHidden, openExport, openRecipe, loadLineage, resetRecipe, deleteCopy,
+  loadRecipe, selectShot, findRecord, setHidden, openExport, openRecipe, loadLineage, resetRecipe, deleteCopy, openStepEditor,
 } from '../store.js';
 import {
   num, trimNum, ratio, when, cap, brewTemp, stepControl, stepEnds, stepLimit, deg,
@@ -36,7 +36,8 @@ export function createRecipe() {
   const rename = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Rename' });
   const dup = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Duplicate' });
   const tags = h('div', { class: 'tags tags-head' });
-  const head = sheetHead({ title: 'Recipe', back: { label: 'All recipes', onClick: () => go('recipes') }, right: [tags, star, rename, dup] });
+  const editSteps = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Edit steps', onClick: () => record && openStepEditor(record) });
+  const head = sheetHead({ title: 'Recipe', back: { label: 'All recipes', onClick: () => go('recipes') }, right: [tags, star, editSteps, rename, dup] });
   const title = head.titleEl;
 
   const chartBox = h('div', { class: 'profile-chart-box' });
@@ -178,6 +179,7 @@ export function createRecipe() {
       const c = record.changes;
       if (c.temp) rows.push(h('span', { text: 'Temperature' }), h('s', { text: deg(c.temp[0], 1) }), h('b', { text: deg(c.temp[1], 1) }));
       if (c.out) rows.push(h('span', { text: 'Espresso out' }), h('s', { text: c.out[0] > 0 ? `${num(c.out[0], 0)} g` : 'Off' }), h('b', { text: c.out[1] > 0 ? `${num(c.out[1], 0)} g` : 'Off' }));
+      if (c.steps) rows.push(h('span', { text: 'Steps' }), h('s', { text: '' }), h('b', { text: 'changed' }));
       replaceKids(changeList, rows);
     }
 

@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.8.0.zip`.
+   **Install skin → ZIP file** and pick `mise-0.9.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -97,6 +97,16 @@ Every recipe is yours to change.
   Duplicate, Reset to original, Keep on the Brew screen, Export, and Archive
   (or Delete for a recipe of your own). Archive and Delete can be undone.
   Archived recipes are under the **Archived** filter.
+- **New recipe** in Recipes opens the step editor with a three-step starting
+  point; **Edit steps** on a recipe's page (or in its menu) opens it for that
+  recipe. Each step has a name, whether the pump holds a pressure or a flow,
+  the target, whether it gets there at once or gradually, water temperature,
+  how long it lasts, an optional limit, and what ends it early (pressure or
+  flow above or below a value, or a weight in the cup). Steps can be added,
+  copied, reordered and removed (up to 20), and the chart redraws as you go.
+  Nothing changes until **Save**. A new recipe is saved into Decaid, so other
+  skins see it; so are changes to recipes you made there. Changed steps of a
+  built-in recipe are kept by Mise, with Reset to original.
 - Recipes also has **Import** (a Decaid or Mise export, or one recipe from
   de1app or Visualizer, from a file or pasted) and **Export**.
 

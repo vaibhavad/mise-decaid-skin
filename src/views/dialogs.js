@@ -5,7 +5,7 @@ import { h, setText, show, replaceKids } from '../dom.js';
 import {
   S, nameOf, renameProfile, duplicateProfile, deleteCopy, openDuplicate, closeDialog,
   findPlaces, setPlace, importRecipes, toast, openRename, resetRecipe, toggleFavorite, favoriteIds,
-  setHidden, openExport, openRecipe,
+  setHidden, openExport, openRecipe, openStepEditor,
 } from '../store.js';
 
 export function createDialogs() {
@@ -254,6 +254,7 @@ export function createDialogs() {
     });
     replaceKids(menuItems, [
       item('Open', () => openRecipe(record.id)),
+      item('Edit steps', () => openStepEditor(record)),
       item('Rename', () => openRename(record)),
       item('Duplicate', () => openDuplicate(record)),
       record.edited ? item('Reset to original', () => resetRecipe(record)) : null,

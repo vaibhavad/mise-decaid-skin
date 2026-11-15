@@ -20,10 +20,11 @@ import { createRecipe } from './views/recipe.js';
 import { createHistory } from './views/history.js';
 import { createSettings } from './views/settings.js';
 import { createCoffees } from './views/coffees.js';
+import { createEditor } from './views/editor.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 document.documentElement.dataset.miseVersion = VERSION;
 watchViewport();
 const app = document.getElementById('app');
@@ -119,7 +120,7 @@ const cover = h('div', { class: 'cover', hidden: true },
 const main = h('main', { class: 'main' }, topbar, home.el);
 app.append(main, sheetLayer, shot.el, utility.el, ruler.el, dialogs.el, cover, sleep.el, demoPanel, toastEl);
 
-const sheets = { recipes: createRecipes, recipe: createRecipe, history: createHistory, settings: createSettings, coffees: createCoffees };
+const sheets = { recipes: createRecipes, recipe: createRecipe, history: createHistory, settings: createSettings, coffees: createCoffees, editor: createEditor };
 const built = {};
 let currentSheet = null;
 

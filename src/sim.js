@@ -584,7 +584,8 @@ export function createSim(options = {}) {
       const record = profiles.find((r) => r.id === decodeURIComponent(parts[1]));
       if (!record) throw httpError(400, 'Profile not found');
       if (record.isDefault && body?.profile) throw httpError(400, 'Cannot modify default profile content');
-      if (body?.profile) record.profile = clone(body.profile);
+      if (body?.profile) { record.profile = clone(body.profile); record.id = profileId(record.profile); }
+      if (body?.metadata) record.metadata = clone(body.metadata);
       return clone(record);
     }
     if (route === 'PUT /api/v1/scale/tare') { machine.weight = 0; return null; }

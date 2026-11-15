@@ -49,6 +49,7 @@ export const S = {
   hiddenProfiles: [],        // recipes you hid
   lineage: {},               // recipe id -> its versions
   machineSettings: null,     // fan, tank, purge mode…
+  draft: null,               // the recipe open in the step editor
   edits: {},                 // recipe id -> what you changed: { temp, out, dose, grind }
   toastUndo: null,           // what the toast's Undo button does
   sleepPreview: false,       // showing the sleep screen from Settings
@@ -522,13 +523,17 @@ function withEdit(r) {
   let profile = r.profile;
   const baseTemp = brewTemp(profile);
   const baseOut = Number(profile.target_weight) || 0;
-  const tempChanged = e.temp != null && baseTemp != null && Math.abs(e.temp - baseTemp) > 0.01;
+  const stepsChanged = Array.isArray(e.steps) && e.steps.length > 0;
+  if (stepsChanged) profile = { ...profile, steps: e.steps };
+  if (e.notes != null) profile = { ...profile, notes: e.notes };
+  const nowTemp = e.temp ?? brewTemp(profile);
+  const tempChanged = nowTemp != null && baseTemp != null && Math.abs(nowTemp - baseTemp) > 0.01;
   const outChanged = e.out != null && e.out !== baseOut;
-  if (tempChanged) profile = { ...profile, steps: stepsAtTemp(profile, e.temp) || profile.steps };
+  if (e.temp != null && Math.abs(e.temp - brewTemp(profile)) > 0.01) profile = { ...profile, steps: stepsAtTemp(profile, e.temp) || profile.steps };
   if (outChanged && e.out > 0) profile = { ...profile, target_weight: e.out };
   return {
-    ...r, profile, original: r.profile, hasEdit: true, edited: tempChanged || outChanged,
-    changes: { temp: tempChanged ? [baseTemp, e.temp] : null, out: outChanged ? [baseOut, e.out] : null },
+    ...r, profile, original: r.profile, hasEdit: true, edited: tempChanged || outChanged || stepsChanged,
+    changes: { temp: tempChanged ? [baseTemp, nowTemp] : null, out: outChanged ? [baseOut, e.out] : null, steps: stepsChanged },
     out: e.out ?? null, dose: e.dose ?? null, grind: e.grind ?? null,
   };
 }
@@ -703,6 +708,7 @@ export function go(view) {
   if (view === 'coffees') loadCoffees();
   if (view === 'recipes') loadHidden();
   if (view === 'recipe') loadLineage(S.recipeId);
+  if (view !== 'editor') S.draft = null;
   if (view === 'history') {
     if (!S.selectedShot && S.shots?.[0]) selectShot(S.shots[0].id);
     backfillTimes();
@@ -1570,4 +1576,140 @@ export function nextWake(now = new Date()) {
     }
   }
   return best;
+}
+
+
+// ── Step editor ──────────────────────────────────────────────────────────
+// S.draft is a working copy of one recipe: nothing changes until Save.
+
+const clone = (x) => JSON.parse(JSON.stringify(x));
+export const MAX_STEPS = 20; // what the machine can hold
+
+const TEMPLATE = {
+  version: '2', title: '', author: '', notes: '', beverage_type: 'espresso',
+  tank_temperature: 0, target_weight: 36, target_volume: 0, target_volume_count_start: 0,
+  steps: [
+    { name: 'Soak', pump: 'flow', flow: 4, pressure: 1, transition: 'fast', temperature: 93, sensor: 'coffee', seconds: 10, volume: 0, weight: 0, exit: { type: 'pressure', condition: 'over', value: 4 } },
+    { name: 'Rise and hold', pump: 'pressure', pressure: 9, flow: 0, transition: 'fast', temperature: 93, sensor: 'coffee', seconds: 8, volume: 0, weight: 0 },
+    { name: 'Ease off', pump: 'pressure', pressure: 6, flow: 0, transition: 'smooth', temperature: 93, sensor: 'coffee', seconds: 30, volume: 0, weight: 0 },
+  ],
+};
+
+export function openStepEditor(record = null) {
+  const kind = !record ? 'new' : record.copy ? 'copy' : record.isDefault === false ? 'own' : 'builtin';
+  S.draft = {
+    kind, sourceId: record?.id || null, wasInUse: record ? isInUse(record) : false,
+    name: record ? nameOf(record) : '', startName: record ? nameOf(record) : '',
+    profile: clone(record ? record.profile : TEMPLATE), selected: 0, token: Date.now(), dirty: false,
+  };
+  go('editor');
+}
+
+export function draftChange(change) {
+  if (!S.draft) return;
+  const next = { ...S.draft, profile: { ...S.draft.profile, steps: S.draft.profile.steps.map((x) => ({ ...x })) }, dirty: true };
+  change(next);
+  next.selected = Math.max(0, Math.min(next.selected, next.profile.steps.length - 1));
+  S.draft = next;
+  emit();
+}
+
+export function newStep(after) {
+  const base = after ? clone(after) : clone(TEMPLATE.steps[1]);
+  delete base.exit;
+  return { ...base, name: 'New step' };
+}
+
+function tidyProfile(d, title) {
+  const num = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+  const steps = d.profile.steps.map((x, i) => {
+    const step = {
+      ...x, name: cleanName(x.name) || `Step ${i + 1}`, pump: x.pump === 'pressure' ? 'pressure' : 'flow',
+      transition: x.transition === 'smooth' ? 'smooth' : 'fast', sensor: x.sensor === 'water' ? 'water' : 'coffee',
+      temperature: num(x.temperature, 93), seconds: num(x.seconds), pressure: num(x.pressure), flow: num(x.flow),
+      volume: num(x.volume), weight: num(x.weight),
+    };
+    if (!(x.exit && x.exit.type && num(x.exit.value) > 0)) delete step.exit;
+    else step.exit = { type: x.exit.type, condition: x.exit.condition === 'under' ? 'under' : 'over', value: num(x.exit.value) };
+    if (!(x.limiter && num(x.limiter.value) > 0)) delete step.limiter;
+    else step.limiter = { value: num(x.limiter.value), range: num(x.limiter.range, 0.6) };
+    return step;
+  });
+  return {
+    version: '2', tank_temperature: 0, target_volume: 0, target_volume_count_start: 0, beverage_type: 'espresso',
+    ...d.profile, title, steps, target_weight: num(d.profile.target_weight),
+  };
+}
+
+export async function saveDraft() {
+  const d = S.draft;
+  if (!d) return false;
+  const name = cleanName(d.name);
+  if (!name) { toast('Give the recipe a name first.'); return false; }
+  if (!d.profile.steps.length) { toast('A recipe needs at least one step.'); return false; }
+  const source = d.sourceId ? findRecord(d.sourceId) : null;
+  const reload = async (id) => {
+    const fresh = findRecord(id);
+    if (fresh && d.wasInUse) await useProfile(fresh, false);
+    S.draft = null;
+    S.recipeId = id;
+    S.view = 'recipe';
+    loadLineage(id);
+    toast(`Saved ${name}`);
+  };
+  try {
+    if (d.kind === 'new') {
+      const title = uniqueTitle(name);
+      const made = await T.request('POST', api('/profiles'), { profile: tidyProfile(d, title), parentId: null });
+      if (!made?.id || made.profile?.title !== title) {
+        toast(`These steps are the same as ${made?.profile?.title || 'another recipe'}. Change something to save it as a new recipe.`);
+        return false;
+      }
+      await reloadProfiles();
+      if (favoriteIds().length < 5) {
+        S.favorites = [...favoriteIds(), made.id];
+        quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+      }
+      await reload(made.id);
+      return true;
+    }
+    if (!source) { toast('That recipe is no longer here.'); return false; }
+    if (d.kind === 'copy') {
+      const title = name === d.startName ? source.profile.title : uniqueTitle(name, source.id);
+      const profile = tidyProfile(d, title);
+      S.copies = S.copies.map((c) => (c.id === source.id ? { ...c, profile, out: profile.target_weight } : c));
+      saveCopies();
+      await reload(source.id);
+      return true;
+    }
+    if (d.kind === 'own') {
+      const title = name === d.startName ? (source.original || source.profile).title : uniqueTitle(name, source.id);
+      const updated = await T.request('PUT', api(`/profiles/${encodeURIComponent(source.id)}`), { profile: tidyProfile(d, title) });
+      const newId = updated?.id || source.id;
+      const kept = S.edits[source.id] ? { dose: S.edits[source.id].dose ?? null, grind: S.edits[source.id].grind ?? null } : null;
+      const edits = { ...S.edits };
+      delete edits[source.id];
+      if (kept && (kept.dose || kept.grind)) edits[newId] = kept;
+      S.edits = edits;
+      saveEdits();
+      if (newId !== source.id && Array.isArray(S.favorites) && S.favorites.includes(source.id)) {
+        S.favorites = S.favorites.map((id) => (id === source.id ? newId : id));
+        quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+      }
+      await reloadProfiles();
+      await reload(newId);
+      return true;
+    }
+    // A built-in recipe: Decaid will not change it, so your steps are kept
+    // beside it and "Reset to original" brings the built-in back.
+    const profile = tidyProfile(d, (source.original || source.profile).title);
+    S.edits = { ...S.edits, [source.id]: { ...(S.edits[source.id] || {}), steps: profile.steps, out: profile.target_weight, temp: null, notes: profile.notes || '' } };
+    saveEdits();
+    if (name !== d.startName) await renameProfile(findRecord(source.id), name);
+    await reload(source.id);
+    return true;
+  } catch {
+    toast('The recipe could not be saved. Check the connection and try again.');
+    return false;
+  }
 }

@@ -4,7 +4,7 @@
 
 import { h, setAttr, replaceKids, icon, setText } from '../dom.js';
 import {
-  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite, openImport, openExport, openMenu,
+  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite, openImport, openExport, openMenu, openStepEditor,
 } from '../store.js';
 import { firstSentence, deg, num } from '../format.js';
 import { profileCurve } from '../chart.js';
@@ -44,6 +44,7 @@ export function createRecipes() {
   search.addEventListener('input', () => { query = search.value.trim().toLowerCase(); update(); });
   const head = sheetHead({ title: 'Recipes', right: [
     search,
+    h('button', { class: 'btn btn-primary btn-small', type: 'button', text: 'New recipe', onClick: () => openStepEditor() }),
     h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Import', onClick: openImport }),
     h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Export', onClick: () => openExport() }),
   ] });

@@ -6,7 +6,7 @@ import {
 } from '../store.js';
 import { toShown, fromShown, tempUnit, trimNum } from '../format.js';
 
-function tempSpec({ label, hint, c, min, max, presets = [], save }) {
+export function tempSpec({ label, hint, c, min, max, presets = [], save }) {
   const f = tempUnit() === 'f';
   const step = f ? 1 : 0.5;
   return {
