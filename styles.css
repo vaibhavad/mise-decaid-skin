@@ -726,3 +726,17 @@ ol { list-style: none; }
 .sheet-layer, .shot-view, .scrim, .cover, .backdrop { bottom: auto; height: var(--app-h, 100vh); }
 .main, .sheet, .shot-view, .backdrop, .scrim { transition: transform 0.2s ease-out; }
 html, body { overflow: hidden; }
+
+/* Recipes you can change: Edited tag, your changes, press-and-hold menu, Undo */
+.pill-edited { border-color: transparent; background: #3A3018; color: var(--warn); }
+.chg { display: grid; grid-template-columns: 1fr auto auto; gap: 0.4rem 1.1rem; align-items: center; font-size: 0.9375rem; }
+.chg s { color: var(--muted); }
+.changes-box .btn { align-self: flex-start; margin-top: 0.3rem; }
+.dialog-menu { width: 22rem; gap: 0.6rem; padding: 1.25rem; }
+.menu-items { display: flex; flex-direction: column; }
+.menu-item { min-height: 3.25rem; padding: 0 0.9rem; border: none; border-radius: 0.9rem; background: transparent; text-align: left; font-size: 1rem; font-weight: 500; }
+.menu-item:active { background: var(--raise); }
+.menu-danger { color: var(--low); }
+.toast { display: flex; align-items: center; gap: 0.9rem; }
+.toast[hidden] { display: none; }
+.toast-undo { min-height: 2.25rem; padding: 0 1rem; border-radius: 999px; border: 1px solid var(--bg); background: transparent; color: var(--bg); font-size: 0.875rem; font-weight: 700; }

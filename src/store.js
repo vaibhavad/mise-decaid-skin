@@ -49,6 +49,8 @@ export const S = {
   hiddenProfiles: [],        // recipes you hid
   lineage: {},               // recipe id -> its versions
   machineSettings: null,     // fan, tank, purge mode…
+  edits: {},                 // recipe id -> what you changed: { temp, out, dose, grind }
+  toastUndo: null,           // what the toast's Undo button does
   sleepPreview: false,       // showing the sleep screen from Settings
   yearShots: null,           // this year's shots, light: { t, taste, batch }
   schedules: null,           // Decaid's wake schedules
@@ -78,11 +80,21 @@ export function transport() {
 }
 
 let toastTimer = null;
-export function toast(message) {
+export function toast(message, undo = null) {
   S.toast = message;
+  S.toastUndo = undo;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { S.toast = null; emit(); }, 4000);
+  toastTimer = setTimeout(() => { S.toast = null; S.toastUndo = null; emit(); }, undo ? 6000 : 4000);
   emit();
+}
+
+export function undoToast() {
+  const fn = S.toastUndo;
+  S.toast = null;
+  S.toastUndo = null;
+  clearTimeout(toastTimer);
+  emit();
+  if (fn) fn();
 }
 
 const api = (path) => `/api/v1${path}`;
@@ -126,6 +138,7 @@ export async function loadAll() {
     quiet(T.request('GET', api('/store/mise/weather'))).then((p) => { if (p && typeof p.latitude === 'number') S.place = p; }),
     quiet(T.request('GET', api('/store/mise/layout'))).then((l) => { if (l && typeof l === 'object' && !Array.isArray(l)) applyLayout(l); }),
     loadCoffees(),
+    quiet(T.request('GET', api('/store/mise/edits'))).then((e) => { if (e && typeof e === 'object' && !Array.isArray(e)) S.edits = e; }),
   ]);
   if (S.cleaning.totalAtClean == null && S.shotsTotal != null) {
     S.cleaning.totalAtClean = S.shotsTotal;
@@ -394,13 +407,26 @@ export const values = {
   grind: () => S.workflow?.context?.grinderSetting ?? '',
 };
 
-export function setDose(value) {
+// Every change on the Brew screen is saved into the recipe in use, with an
+// Undo in the toast. Recipes of your own are changed directly; for the rest
+// Mise keeps your changes beside the original, so "Reset to original" works.
+function saved(undo, quietly) {
+  if (quietly) return;
+  const name = displayTitle(S.workflow?.profile?.title);
+  if (name && (activeCopy() || activeRecord())) toast(`Saved to ${name}`, undo);
+}
+
+export function setDose(value, quietly) {
+  const prev = values.dose();
   const dose = Math.round(clamp(value, 5, 30) * 10) / 10;
   queuePatch({ context: { targetDoseWeight: dose } });
   tuneCopy((copy) => { copy.dose = dose; });
+  tuneEdit({ dose });
+  saved(prev ? () => setDose(prev, true) : null, quietly);
 }
 
-export function setOut(value) {
+export function setOut(value, quietly) {
+  const prev = values.out();
   // Decaid sets no upper limit on the target weight; the ruler goes to 1000 g.
   const out = Math.round(clamp(value, 0, 1000));
   const patch = { context: { targetYield: out } };
@@ -410,19 +436,28 @@ export function setOut(value) {
     copy.out = out;
     if (out > 0) copy.profile = { ...copy.profile, target_weight: out };
   });
+  tuneEdit({ out });
+  saved(() => setOut(prev, true), quietly);
 }
 
-export function setTemp(value) {
-  const steps = stepsAtTemp(S.workflow?.profile, roundTo(clamp(value, 70, 105), 0.5));
+export function setTemp(value, quietly) {
+  const prev = values.temp();
+  const temp = roundTo(clamp(value, 70, 105), 0.5);
+  const steps = stepsAtTemp(S.workflow?.profile, temp);
   if (!steps) return;
   queuePatch({ profile: { steps } });
   tuneCopy((copy) => { copy.profile = { ...copy.profile, steps }; });
+  tuneEdit({ temp });
+  saved(prev != null ? () => setTemp(prev, true) : null, quietly);
 }
 
-export function setGrind(value) {
+export function setGrind(value, quietly) {
+  const prev = values.grind();
   const grind = String(Math.round(clamp(value, 0, 999) * 100) / 100);
   queuePatch({ context: { grinderSetting: grind } });
   tuneCopy((copy) => { copy.grind = grind; });
+  tuneEdit({ grind });
+  saved(prev !== '' ? () => setGrind(prev, true) : null, quietly);
 }
 
 export function setSteam(patch) { queuePatch({ steamSettings: patch }); }
@@ -447,15 +482,16 @@ export function useProfile(record, message) {
   const target = Number(record.profile?.target_weight);
   const body = { profile: record.profile };
   const context = {};
-  const saved = record.copy ? record : (record.metadata?.mise || {});
-  if (record.copy && record.out != null) context.targetYield = record.out;
+  const own = record.copy || record.hasEdit;
+  const saved = own ? record : (record.metadata?.mise || {});
+  if (own && record.out != null) context.targetYield = record.out;
   else if (target > 0) context.targetYield = target;
   if (saved.dose) context.targetDoseWeight = saved.dose;
   if (saved.grind != null && saved.grind !== '') context.grinderSetting = String(saved.grind);
   if (Object.keys(context).length) body.context = context;
   S.workflow = deepMerge(S.workflow || {}, body);
   emit();
-  return putWorkflow(body, message || `Now using ${nameOf(record)}`);
+  return putWorkflow(body, message === false ? null : (message || `Now using ${nameOf(record)}`));
 }
 
 export function brewAgain(shot) {
@@ -476,18 +512,76 @@ export function brewAgain(shot) {
 // a Decaid profile record with `copy: true` and its own dose, yield and grind.
 let listProfiles = null;
 let listCopies = null;
+let listEdits = null;
 let listCache = [];
+
+// A recipe with your changes laid over it. `original` keeps what Decaid has.
+function withEdit(r) {
+  const e = S.edits[r.id];
+  if (!e) return r;
+  let profile = r.profile;
+  const baseTemp = brewTemp(profile);
+  const baseOut = Number(profile.target_weight) || 0;
+  const tempChanged = e.temp != null && baseTemp != null && Math.abs(e.temp - baseTemp) > 0.01;
+  const outChanged = e.out != null && e.out !== baseOut;
+  if (tempChanged) profile = { ...profile, steps: stepsAtTemp(profile, e.temp) || profile.steps };
+  if (outChanged && e.out > 0) profile = { ...profile, target_weight: e.out };
+  return {
+    ...r, profile, original: r.profile, hasEdit: true, edited: tempChanged || outChanged,
+    changes: { temp: tempChanged ? [baseTemp, e.temp] : null, out: outChanged ? [baseOut, e.out] : null },
+    out: e.out ?? null, dose: e.dose ?? null, grind: e.grind ?? null,
+  };
+}
+
 export function visibleProfiles() {
-  if (listProfiles === S.profiles && listCopies === S.copies) return listCache;
+  if (listProfiles === S.profiles && listCopies === S.copies && listEdits === S.edits) return listCache;
   listProfiles = S.profiles;
   listCopies = S.copies;
+  listEdits = S.edits;
   listCache = (S.profiles || [])
     .filter((r) => r?.profile?.title && (r.visibility || 'visible') === 'visible')
+    .map(withEdit)
     .concat(S.copies.map((c) => ({
       id: c.id, profile: c.profile, isDefault: false, copy: true,
       dose: c.dose ?? null, grind: c.grind ?? null, out: c.out ?? null, from: c.from || '', fromId: c.fromId || null,
     })));
   return listCache;
+}
+
+// The Decaid recipe on the Brew screen (not one of your own).
+function activeRecord() {
+  const title = S.workflow?.profile?.title;
+  if (!title || activeCopy()) return null;
+  return (S.profiles || []).find((r) => r?.profile?.title === title) || null;
+}
+
+let editTimer = null;
+function saveEdits() {
+  clearTimeout(editTimer);
+  editTimer = setTimeout(() => quiet(T.request('POST', api('/store/mise/edits'), S.edits)), 800);
+}
+
+function tuneEdit(change) {
+  const record = activeRecord();
+  if (!record) return;
+  S.edits = { ...S.edits, [record.id]: { ...(S.edits[record.id] || {}), ...change } };
+  saveEdits();
+}
+
+// Back to the recipe as Decaid has it. Undo brings your changes back.
+export function resetRecipe(record) {
+  const before = S.edits[record.id];
+  if (!before) return;
+  const apply = (edit, message, undo) => {
+    const next = { ...S.edits };
+    if (edit) next[record.id] = edit; else delete next[record.id];
+    S.edits = next;
+    saveEdits();
+    const fresh = visibleProfiles().find((r) => r.id === record.id);
+    if (fresh && S.workflow?.profile?.title === fresh.profile.title) useProfile(fresh, false).then(() => toast(message, undo));
+    else toast(message, undo);
+  };
+  apply(null, `${nameOf(record)} is back to the original`, () => apply(before, 'Your changes are back', null));
 }
 
 // Any recipe by id, including ones you hid.
@@ -758,9 +852,16 @@ export async function renameProfile(record, input) {
   if (record.isDefault === false && name !== original) {
     try {
       const updated = await T.request('PUT', api(`/profiles/${encodeURIComponent(record.id)}`), {
-        profile: { ...record.profile, title: name },
+        profile: { ...(record.original || record.profile), title: name },
       });
-      const next = updated?.profile ? updated : { ...record, profile: { ...record.profile, title: name } };
+      const raw = (S.profiles || []).find((r) => r.id === record.id) || record;
+      const next = updated?.profile ? updated : { ...raw, profile: { ...raw.profile, title: name } };
+      if (next.id !== record.id && S.edits[record.id]) {
+        const moved = { ...S.edits, [next.id]: S.edits[record.id] };
+        delete moved[record.id];
+        S.edits = moved;
+        saveEdits();
+      }
       S.profiles = (S.profiles || []).map((r) => (r.id === record.id ? next : r));
       if (S.recipeId === record.id) S.recipeId = next.id;
       if (next.id !== record.id && Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
@@ -843,6 +944,11 @@ export function toggleCard(card) {
 
 export function openForm(spec) {
   S.dialog = { kind: 'form', ...spec };
+  emit();
+}
+
+export function openMenu(record) {
+  S.dialog = { kind: 'menu', record };
   emit();
 }
 
@@ -1017,7 +1123,7 @@ export async function duplicateProfile(record, input) {
   }
   const made = visibleProfiles().find((r) => r.id === copy.id);
   if (S.view === 'recipe') S.recipeId = copy.id;
-  await useProfile(made, `Now using your copy, ${title}. Changes on the Brew screen are saved to it.`);
+  await useProfile(made, `Now using ${title}`);
   return true;
 }
 
@@ -1033,13 +1139,20 @@ function renameCopy(record, name) {
 }
 
 export function deleteCopy(record) {
+  const removed = S.copies.find((c) => c.id === record.id);
+  const starred = Array.isArray(S.favorites) && S.favorites.includes(record.id);
   S.copies = S.copies.filter((c) => c.id !== record.id);
   saveCopies();
   if (Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
     S.favorites = S.favorites.filter((id) => id !== record.id);
     quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
   }
-  toast(`Deleted your copy, ${record.profile.title}`);
+  toast(`Deleted ${record.profile.title}`, removed ? () => {
+    S.copies = [...S.copies, removed];
+    saveCopies();
+    if (starred) { S.favorites = [...(S.favorites || []), record.id]; quiet(T.request('POST', api('/store/mise/favorites'), S.favorites)); }
+    emit();
+  } : null);
   if (S.view === 'recipe' && S.recipeId === record.id) S.view = 'recipes';
   emit();
 }
@@ -1244,7 +1357,7 @@ export async function setHidden(record, hidden) {
       quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
     }
     await reloadProfiles();
-    toast(hidden ? `Hid ${nameOf(record)}. Find it under Hidden in Recipes.` : `${nameOf(record)} is back in your recipes`);
+    toast(hidden ? `Archived ${nameOf(record)}` : `${nameOf(record)} is back in your recipes`, hidden ? () => setHidden(record, false) : null);
   } catch {
     toast('That recipe could not be changed.');
   }

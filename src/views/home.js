@@ -108,7 +108,8 @@ export function createHome() {
 
   function buildCards() {
     cardEls = records.map((record, i) => {
-      const copy = record.copy ? h('span', { class: 'pill pill-quiet', text: 'Your copy' }) : null;
+      const copy = record.copy ? h('span', { class: 'pill pill-quiet', text: 'Yours' })
+        : record.edited ? h('span', { class: 'pill pill-edited', text: 'Edited' }) : null;
       return h('button', {
         class: 'r-card', type: 'button', 'data-i': i,
         'aria-label': nameOf(record),
@@ -289,7 +290,7 @@ export function createHome() {
 
   function updateCarousel() {
     const list = carouselRecords();
-    const key = list.map((r) => `${r.id}:${nameOf(r)}:${r.profile.steps?.length}:${r.out}`).join('|');
+    const key = list.map((r) => `${r.id}:${nameOf(r)}:${r.profile.steps?.length}:${r.out}:${r.profile.steps?.[0]?.temperature}:${r.profile.target_weight}:${r.edited}`).join('|');
     if (key !== listKey) {
       listKey = key;
       records = list;

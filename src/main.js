@@ -7,7 +7,7 @@ import { h, setText, setAttr, show, icon } from './dom.js';
 import { gatewayHost, httpTransport, savedGateway, forgetGateway } from './api.js';
 import { createSim } from './sim.js';
 import {
-  S, subscribe, connect, loadAll, go, requestState, heartbeat, toast, transport, reloadMachine, status, closeEditor,
+  S, subscribe, connect, loadAll, go, requestState, heartbeat, toast, transport, reloadMachine, status, closeEditor, undoToast,
 } from './store.js';
 import { deg } from './format.js';
 import { watchViewport } from './viewport.js';
@@ -23,7 +23,7 @@ import { createCoffees } from './views/coffees.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 document.documentElement.dataset.miseVersion = VERSION;
 watchViewport();
 const app = document.getElementById('app');
@@ -100,7 +100,9 @@ const dialogs = createDialogs();
 const sheetBox = h('div', { class: 'sheet' });
 const sheetLayer = h('div', { class: 'sheet-layer', hidden: true }, sheetBox);
 sheetLayer.addEventListener('pointerdown', (e) => { if (e.target === sheetLayer) go('home'); });
-const toastEl = h('div', { class: 'toast', role: 'status', hidden: true });
+const toastText = h('span');
+const toastUndo = h('button', { class: 'toast-undo', type: 'button', text: 'Undo', onClick: undoToast });
+const toastEl = h('div', { class: 'toast', role: 'status', hidden: true }, toastText, toastUndo);
 
 // Connection screens
 const coverTitle = h('h1', { class: 'page-title' });
@@ -175,7 +177,8 @@ function render() {
   dialogs.update();
 
   show(toastEl, Boolean(S.toast));
-  if (S.toast) setText(toastEl, S.toast);
+  if (S.toast) setText(toastText, S.toast);
+  show(toastUndo, Boolean(S.toastUndo));
 }
 
 subscribe(render);

@@ -4,13 +4,13 @@
 
 import { h, setAttr, replaceKids, icon, setText } from '../dom.js';
 import {
-  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite, openImport, openExport,
+  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite, openImport, openExport, openMenu,
 } from '../store.js';
 import { firstSentence, deg, num } from '../format.js';
 import { profileCurve } from '../chart.js';
 import { sheetHead } from './parts.js';
 
-const FILTERS = ['All', 'Starred', 'Your copies', 'Espresso', 'Filter and tea', 'Cleaning', 'Hidden'];
+const FILTERS = ['All', 'Starred', 'Yours', 'Espresso', 'Filter and tea', 'Cleaning', 'Archived'];
 const SORTS = [{ key: 'name', label: 'A–Z' }, { key: 'recent', label: 'Recently brewed' }];
 
 export function kind(profile) {
@@ -19,6 +19,19 @@ export function kind(profile) {
   if (type === 'cleaning' || type === 'calibrate' || /clean|descale|flush/.test(title)) return 'Cleaning';
   if (type === 'pourover' || /tea|filter|pour.?over/.test(title)) return 'Filter and tea';
   return 'Espresso';
+}
+
+// A tap opens; pressing and holding (or a right-click) opens the menu.
+function holdOrTap(tap, hold) {
+  let timer = null;
+  let held = false;
+  const clear = () => { clearTimeout(timer); timer = null; };
+  return {
+    onPointerdown: () => { held = false; clear(); timer = setTimeout(() => { held = true; hold(); }, 480); },
+    onPointerup: clear, onPointerleave: clear, onPointercancel: clear,
+    onContextmenu: (e) => { e.preventDefault(); clear(); if (!held) { held = true; hold(); } },
+    onClick: () => { if (held) { held = false; return; } tap(); },
+  };
 }
 
 export function createRecipes() {
@@ -61,20 +74,20 @@ export function createRecipes() {
     const all = visibleProfiles();
     const favs = favoriteIds();
     const current = S.workflow?.profile?.title || '';
-    const next = `${S.hiddenProfiles.map((r) => r.id).join(',')}|${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${sort}|${query}|${all.map(nameOf).join('\u0001')}|${(S.shots || []).length}|${S.layout.unit}`;
+    const next = `${JSON.stringify(S.edits)}|${S.hiddenProfiles.map((r) => r.id).join(',')}|${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${sort}|${query}|${all.map(nameOf).join('\u0001')}|${(S.shots || []).length}|${S.layout.unit}`;
     if (next === key) return;
     key = next;
     setText(head.subEl, S.profiles ? `${all.length} recipes · ${favs.length} of 5 starred for the Brew screen` : '');
     setText(tip, filter === 'Starred' ? 'Use the arrows to set the order they appear on the Brew screen.'
-      : filter === 'Hidden' ? 'Recipes you hid. Open one to show it again.'
-        : 'Tap a recipe to see it in full and load it. The star keeps it on the Brew screen.');
+      : filter === 'Archived' ? 'Recipes you archived. Open one to bring it back.'
+        : 'Tap a recipe to open it. Press and hold for rename, duplicate and more.');
 
     if (!S.profiles) { replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]); return; }
     const recent = lastBrewed();
-    let shown = (filter === 'Hidden' ? S.hiddenProfiles : all).filter((record) => {
+    let shown = (filter === 'Archived' ? S.hiddenProfiles : all).filter((record) => {
       const p = record.profile;
       if (filter === 'Starred' && !favs.includes(record.id)) return false;
-      if (filter === 'Your copies' && !record.copy) return false;
+      if (filter === 'Yours' && !record.copy) return false;
       if (['Espresso', 'Filter and tea', 'Cleaning'].includes(filter) && kind(p) !== filter) return false;
       if (query && !`${nameOf(record)} ${p.title} ${p.notes || ''} ${p.author || ''}`.toLowerCase().includes(query)) return false;
       return true;
@@ -84,13 +97,13 @@ export function createRecipes() {
     else shown.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
     if (!shown.length) {
-      replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'Nothing starred yet. Tap a star to add a recipe to the Brew screen.' : filter === 'Your copies' ? 'No copies yet. Duplicate a recipe to make one you can tune.' : filter === 'Hidden' ? 'No hidden recipes. Hide ones you never use from their page.' : 'No recipes match.' })]);
+      replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'Nothing starred yet. Tap a star to add a recipe to the Brew screen.' : filter === 'Yours' ? 'No recipes of your own yet. Duplicate one to start.' : filter === 'Archived' ? 'Nothing archived. Press and hold a recipe you never use to archive it.' : 'No recipes match.' })]);
       return;
     }
     replaceKids(grid, shown.map((record, i) => {
       const p = record.profile;
       const starred = favs.includes(record.id);
-      const hidden = filter === 'Hidden';
+      const hidden = filter === 'Archived';
       const inUse = isInUse(record);
       const t = Number(p.steps?.[0]?.temperature);
       const out = record.copy && record.out != null ? Number(record.out) : Number(p.target_weight) || 0;
@@ -98,14 +111,15 @@ export function createRecipes() {
         h('button', { class: 'icon-btn icon-btn-small', type: 'button', 'aria-label': `Move ${nameOf(record)} earlier`, disabled: i === 0, onClick: () => moveFavorite(record.id, -1) }, icon('back')),
         h('button', { class: 'icon-btn icon-btn-small', type: 'button', 'aria-label': `Move ${nameOf(record)} later`, disabled: i === shown.length - 1, onClick: () => moveFavorite(record.id, 1) }, icon('chevron'))) : null;
       return h('article', { class: 'recipe', 'data-in-use': inUse ? 'true' : null },
-        h('button', { class: 'recipe-main', type: 'button', onClick: () => openRecipe(record.id) },
+        h('button', { class: 'recipe-main', type: 'button', ...holdOrTap(() => openRecipe(record.id), () => openMenu(record)) },
           profileCurve(p, 'curve recipe-curve'),
           h('span', { class: 'recipe-card-title', text: nameOf(record) }),
           h('span', { class: 'recipe-card-meta', text: [Number.isFinite(t) ? deg(t, 1) : null, out > 0 ? `${num(out, 0)} g` : null].filter(Boolean).join(' · ') }),
           h('span', { class: 'recipe-card-text', text: firstSentence(p.notes, 100) || 'No description.' }),
           h('span', { class: 'tags' },
             inUse ? h('span', { class: 'pill pill-solid', text: 'In use' }) : null,
-            record.copy ? h('span', { class: 'pill', text: 'Your copy' }) : null,
+            record.copy ? h('span', { class: 'pill', text: 'Yours' }) : null,
+            record.edited ? h('span', { class: 'pill pill-edited', text: 'Edited' }) : null,
             h('span', { class: 'pill pill-quiet', text: kind(p) }))),
         hidden ? null : h('button', {
           class: 'star', type: 'button', 'aria-pressed': starred ? 'true' : 'false',

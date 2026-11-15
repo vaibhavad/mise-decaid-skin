@@ -4,7 +4,8 @@
 import { h, setText, show, replaceKids } from '../dom.js';
 import {
   S, nameOf, renameProfile, duplicateProfile, deleteCopy, openDuplicate, closeDialog,
-  findPlaces, setPlace, importRecipes, toast,
+  findPlaces, setPlace, importRecipes, toast, openRename, resetRecipe, toggleFavorite, favoriteIds,
+  setHidden, openExport, openRecipe,
 } from '../store.js';
 
 export function createDialogs() {
@@ -57,8 +58,8 @@ export function createDialogs() {
     setText(remove, 'Delete this copy');
     input.value = making ? `${nameOf(record)} copy` : nameOf(record);
     setText(note, making
-      ? `Makes your own copy of "${nameOf(record)}" and switches to it. What you change on the Brew screen is saved to the copy, and the original stays as it is. Once it differs, "Save into Decaid" on its page makes it a recipe other skins can see too.`
-      : record.copy ? 'This is your own copy, kept by Mise.'
+      ? `Makes a new recipe from "${nameOf(record)}" as it is now and switches to it. "${nameOf(record)}" stays as it is.`
+      : record.copy ? 'This is a recipe of your own.'
         : record.isDefault !== false
           ? `This is one of Decaid's built-in recipes, called "${record.profile.title}". Decaid does not let them be renamed, so the new name is used in Mise only.`
           : 'This is a recipe you made in Decaid, so the name changes there and in other skins too.');
@@ -240,7 +241,30 @@ export function createDialogs() {
     }
   }
 
-  const el = h('div', { class: 'backdrop', hidden: true }, recipeForm, cityForm, genericForm, importForm, exportForm);
+  // ── Recipe menu (press and hold) ──
+  const menuTitle = h('h2', { class: 'card-title' });
+  const menuItems = h('div', { class: 'menu-items' });
+  const menuBox = h('div', { class: 'dialog dialog-menu', role: 'menu' }, menuTitle, menuItems);
+  function fillMenu(record) {
+    setText(menuTitle, nameOf(record));
+    const starred = favoriteIds().includes(record.id);
+    const item = (label, action, danger) => h('button', {
+      class: danger ? 'menu-item menu-danger' : 'menu-item', type: 'button', role: 'menuitem', text: label,
+      onClick: () => { closeDialog(); action(); },
+    });
+    replaceKids(menuItems, [
+      item('Open', () => openRecipe(record.id)),
+      item('Rename', () => openRename(record)),
+      item('Duplicate', () => openDuplicate(record)),
+      record.edited ? item('Reset to original', () => resetRecipe(record)) : null,
+      item(starred ? 'Remove from the Brew screen' : 'Keep on the Brew screen', () => toggleFavorite(record.id)),
+      item('Export', () => openExport(record)),
+      record.copy ? item('Delete', () => deleteCopy(record), true) : item('Archive', () => setHidden(record, true)),
+    ].filter(Boolean));
+  }
+
+  const el = h('div', { class: 'backdrop', hidden: true }, recipeForm, cityForm, genericForm, importForm, exportForm, menuBox);
+  el.addEventListener('click', (e) => { if (e.target === el && S.dialog?.kind === 'menu') closeDialog(); });
   el.addEventListener('pointerdown', (event) => { if (event.target === el) closeDialog(); });
   let shown = null;
 
@@ -255,6 +279,8 @@ export function createDialogs() {
     show(genericForm, dialog.kind === 'form');
     show(importForm, dialog.kind === 'import');
     show(exportForm, dialog.kind === 'export');
+    show(menuBox, dialog.kind === 'menu');
+    if (dialog.kind === 'menu') fillMenu(dialog.record);
     if (dialog.kind === 'recipe') fillRecipe(dialog);
     else if (dialog.kind === 'city') fillCity();
     else if (dialog.kind === 'form') fillForm(dialog);

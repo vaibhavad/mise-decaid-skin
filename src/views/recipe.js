@@ -5,8 +5,7 @@
 import { h, setText, setAttr, show, replaceKids, icon } from '../dom.js';
 import {
   S, go, visibleProfiles, favoriteIds, toggleFavorite, isInUse, nameOf, openRename, openDuplicate,
-  loadRecipe, selectShot, findRecord, setHidden, saveCopyToDecaid, brewChanges, saveBrewChanges, openExport,
-  openRecipe, loadLineage,
+  loadRecipe, selectShot, findRecord, setHidden, openExport, openRecipe, loadLineage, resetRecipe, deleteCopy,
 } from '../store.js';
 import {
   num, trimNum, ratio, when, cap, brewTemp, stepControl, stepEnds, stepLimit, deg,
@@ -52,11 +51,13 @@ export function createRecipe() {
   const versionsBox = h('div', { class: 'notes-box' }, h('span', { class: 'label', text: 'Versions' }), versions);
   const mExport = h('button', { class: 'link', type: 'button', text: 'Export as a file' });
   const mHide = h('button', { class: 'link', type: 'button' });
-  const mSave = h('button', { class: 'link', type: 'button', text: 'Save into Decaid' });
-  const mBrew = h('button', { class: 'link', type: 'button', text: 'Save Brew screen changes into it' });
+  const mDelete = h('button', { class: 'link', type: 'button', text: 'Delete this recipe' });
+  const changeList = h('div', { class: 'chg' });
+  const reset = h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Reset to original' });
+  const changesBox = h('div', { class: 'notes-box changes-box' }, h('span', { class: 'label', text: 'Your changes' }), changeList, reset);
   const manageNote = h('span', { class: 'muted small' });
   const manage = h('div', { class: 'notes-box' }, h('span', { class: 'label', text: 'Manage' }),
-    h('div', { class: 'manage-links' }, mBrew, mSave, mExport, mHide), manageNote);
+    h('div', { class: 'manage-links' }, mExport, mHide, mDelete), manageNote);
 
   const body = h('div', { class: 'recipe-page' },
     card('recipe-shape-card',
@@ -68,7 +69,7 @@ export function createRecipe() {
       steps),
     h('div', { class: 'recipe-aside' },
       card('recipe-facts-card',
-        facts,
+        facts, changesBox,
         h('div', { class: 'notes-box' }, h('span', { class: 'label', text: 'About this recipe' }), notes),
         h('div', { class: 'notes-box' }, h('span', { class: 'label', text: 'Recent shots' }), shotsBox),
         versionsBox, manage),
@@ -84,8 +85,8 @@ export function createRecipe() {
   dup.addEventListener('click', () => record && openDuplicate(record));
   mExport.addEventListener('click', () => record && openExport(record));
   mHide.addEventListener('click', () => record && setHidden(record, record.visibility !== 'hidden'));
-  mSave.addEventListener('click', () => record && saveCopyToDecaid(record));
-  mBrew.addEventListener('click', () => record && saveBrewChanges(record));
+  mDelete.addEventListener('click', () => record && deleteCopy(record));
+  reset.addEventListener('click', () => record && resetRecipe(record));
   load.addEventListener('click', () => {
     if (!record) return;
     if (isInUse(record)) go('home'); else loadRecipe(record);
@@ -126,14 +127,15 @@ export function createRecipe() {
     setText(loadHint, inUse ? 'This recipe is already on the Brew screen.' : 'Puts it on the Brew screen, ready for your next shot.');
 
     const shotKey = (S.shots || []).slice(0, 40).map((s) => s.id).join(',');
-    const next = `${record.id}|${nameOf(record)}|${inUse}|${JSON.stringify(p.steps)}|${record.dose}|${record.out}|${record.grind}|${shotKey}|${Object.keys(S.shotDetails).length}|${S.layout.unit}`;
+    const next = `${JSON.stringify(S.edits[record.id] || null)}|${record.id}|${nameOf(record)}|${inUse}|${JSON.stringify(p.steps)}|${record.dose}|${record.out}|${record.grind}|${shotKey}|${Object.keys(S.shotDetails).length}|${S.layout.unit}`;
     if (next === key) return;
     key = next;
 
     setText(title, nameOf(record));
     replaceKids(tags, [
       inUse ? h('span', { class: 'pill pill-solid', text: 'In use' }) : null,
-      record.copy ? h('span', { class: 'pill', text: 'Your copy' }) : null,
+      record.copy ? h('span', { class: 'pill', text: 'Yours' }) : null,
+      record.edited ? h('span', { class: 'pill pill-edited', text: 'Edited' }) : null,
       h('span', { class: 'pill pill-quiet', text: kindOf(p) }),
     ].filter(Boolean));
 
@@ -142,8 +144,9 @@ export function createRecipe() {
     replaceKids(steps, list.length ? list.map(stepItem) : [h('li', { class: 'muted', text: 'This recipe has no steps.' })]);
 
     const target = Number(p.target_weight) || 0;
-    const out = record.copy && record.out != null ? Number(record.out) : target;
-    const dose = record.copy ? Number(record.dose) || null : null;
+    const own = record.copy || record.hasEdit;
+    const out = own && record.out != null ? Number(record.out) : target;
+    const dose = own ? Number(record.dose) || null : null;
     const temp = brewTemp(p);
     const rows = [
       fact('Espresso out', out > 0 ? `${num(out, 0)} g` : 'No stop by weight'),
@@ -151,7 +154,7 @@ export function createRecipe() {
     ];
     if (dose) rows.push(fact('Coffee in', `${num(dose, 1)} g`));
     if (dose && out > 0) rows.push(fact('Ratio', ratio(dose, out)));
-    if (record.copy && record.grind != null && record.grind !== '') rows.push(fact('Grinder setting', String(record.grind)));
+    if (own && record.grind != null && record.grind !== '') rows.push(fact('Grinder setting', String(record.grind)));
     rows.push(fact('Steps', String(list.length)));
     if (record.copy && record.from) rows.push(fact('Copied from', record.from, true));
     else if (p.author) rows.push(fact('Made by', p.author, true));
@@ -165,16 +168,18 @@ export function createRecipe() {
   let lineageFor = null;
   function updateManage() {
     const hidden = record.visibility === 'hidden';
-    setText(mHide, hidden ? 'Show it in Recipes again' : 'Hide this recipe');
+    setText(mHide, hidden ? 'Bring it back to Recipes' : 'Archive this recipe');
     show(mHide, !record.copy);
-    show(mSave, Boolean(record.copy));
-    const changed = brewChanges(record);
-    show(mBrew, changed);
-    setText(manageNote, record.copy
-      ? 'Saving into Decaid turns this copy into a real recipe that other skins and Visualizer see, linked to the recipe it came from.'
-      : changed ? 'You changed this recipe on the Brew screen. Save the changes to keep them in the recipe itself.'
-        : record.isDefault !== false ? 'Built-in recipes cannot be changed. Duplicate one to make your own.' : '');
-    show(manageNote, Boolean(manageNote.textContent));
+    show(mDelete, Boolean(record.copy));
+    setText(manageNote, 'Anything you change on the Brew screen is saved into this recipe.');
+    show(changesBox, Boolean(record.edited));
+    if (record.edited) {
+      const rows = [];
+      const c = record.changes;
+      if (c.temp) rows.push(h('span', { text: 'Temperature' }), h('s', { text: deg(c.temp[0], 1) }), h('b', { text: deg(c.temp[1], 1) }));
+      if (c.out) rows.push(h('span', { text: 'Espresso out' }), h('s', { text: c.out[0] > 0 ? `${num(c.out[0], 0)} g` : 'Off' }), h('b', { text: c.out[1] > 0 ? `${num(c.out[1], 0)} g` : 'Off' }));
+      replaceKids(changeList, rows);
+    }
 
     if (lineageFor !== record.id) { lineageFor = record.id; loadLineage(record.id); }
     const line = S.lineage[record.id] || [];

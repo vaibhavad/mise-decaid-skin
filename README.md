@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.7.1.zip`.
+   **Install skin → ZIP file** and pick `mise-0.8.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -85,23 +85,25 @@ Your coffees and their bags are kept in Decaid's own library (`/beans` and
 
 ## Managing recipes
 
-On a recipe's page, under **Manage**:
+Every recipe is yours to change.
 
-- **Save into Decaid** (your copies): turns a copy into a real Decaid recipe,
-  linked to the recipe it came from, with its dose and grind kept in the
-  recipe's metadata. A copy must differ from the original first (Decaid gives
-  identical recipes the same ID), for example in temperature or espresso out.
-- **Save Brew screen changes into it** (recipes you made): writes the
-  temperature, espresso out, dose and grind from the Brew screen into the
-  recipe.
-- **Hide this recipe**: tidies away recipes you never use. They stay under
-  **Hidden** in Recipes and can be shown again.
-- **Export as a file**, and **Versions**: the recipe it was made from, and
-  recipes made from it.
+- **Change a number on the Brew screen and it is saved into the recipe in
+  use.** A toast confirms it, with **Undo**. The recipe gets an **Edited** tag.
+- A recipe's page lists **Your changes** (the old and new temperature and
+  espresso out) with **Reset to original**. Reset can be undone too.
+- **Duplicate** makes a new recipe from the current one, tagged **Yours**, and
+  leaves the first as it is.
+- In Recipes, **press and hold** a recipe for its menu: Open, Rename,
+  Duplicate, Reset to original, Keep on the Brew screen, Export, and Archive
+  (or Delete for a recipe of your own). Archive and Delete can be undone.
+  Archived recipes are under the **Archived** filter.
+- Recipes also has **Import** (a Decaid or Mise export, or one recipe from
+  de1app or Visualizer, from a file or pasted) and **Export**.
 
-Recipes also has **Import** (a Decaid or Mise export, or one recipe from
-de1app or Visualizer, from a file or pasted) and **Export** (everything,
-including your copies). In the Decaid app, if Download does nothing, use Copy.
+How it is stored: Decaid's built-in recipes cannot be changed, so Mise keeps
+your changes beside them (`mise/edits`) and applies them when the recipe is
+loaded. Recipes you duplicate are kept by Mise (`mise/recipes`). Other skins
+show the originals.
 
 ## Settings and recipe names
 
