@@ -45,7 +45,7 @@ export function createRecipes() {
     const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${query}|${titles}`;
     if (next === key) return;
     key = next;
-    count.textContent = 'Tap a recipe to use it. Star up to five for the Brew screen. The pencil renames one.';
+    count.textContent = 'Tap a recipe to use it. Star up to five for the Brew screen. The pencil renames or duplicates one.';
 
     if (!S.profiles) {
       replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]);
@@ -74,6 +74,7 @@ export function createRecipes() {
           h('span', { class: 'recipe-card-text muted', text: firstSentence(p.notes, 120) || 'No description.' }),
           h('span', { class: 'tags' },
             inUse ? h('span', { class: 'pill pill-solid', text: 'In use' }) : null,
+            record.copy ? h('span', { class: 'pill', text: 'Your copy' }) : null,
             h('span', { class: 'pill pill-quiet', text: kind(p) }))),
         h('button', {
           class: 'star', type: 'button', 'aria-pressed': starred ? 'true' : 'false',
@@ -81,7 +82,7 @@ export function createRecipes() {
           onClick: () => toggleFavorite(record.id),
         }, icon('star', 'icon icon-star')),
         h('button', {
-          class: 'star star-edit', type: 'button', 'aria-label': `Rename ${nameOf(record)}`,
+          class: 'star star-edit', type: 'button', 'aria-label': `Rename or duplicate ${nameOf(record)}`,
           onClick: () => openRename(record),
         }, icon('pencil')));
     }));

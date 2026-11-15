@@ -2,6 +2,7 @@
 // told to refresh through subscribe(); they never talk to the gateway directly.
 
 import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot } from './format.js';
+import { fetchWeather, searchPlaces, demoWeather, demoPlaces } from './weather.js';
 
 export const S = {
   mode: 'connecting',        // connecting | live | demo | offline
@@ -30,7 +31,10 @@ export const S = {
   display: null,             // screen brightness state
   build: null,               // Decaid version info
   names: {},                 // profile id -> name shown in Mise for built-in recipes
-  dialog: null,              // { record } while the rename dialog is open
+  dialog: null,              // { kind: 'recipe' | 'city', ... } while a dialog is open
+  copies: [],                // your duplicated recipes, kept by Mise
+  place: null,               // weather city: { name, region, latitude, longitude, unit }
+  weather: null,             // latest weather for the sleep screen
 };
 
 let T = null;                // transport: { request, stream, demo }
@@ -100,6 +104,8 @@ export async function loadAll() {
     quiet(T.request('GET', api('/store/mise/cleaning'))).then((c) => { if (c && typeof c === 'object') S.cleaning = { ...S.cleaning, ...c }; }),
     quiet(T.request('GET', api('/store/mise/names'))).then((n) => { if (n && typeof n === 'object' && !Array.isArray(n)) S.names = n; }),
     quiet(T.request('GET', api('/settings'))).then((s) => { if (s && typeof s === 'object') S.settings = s; }),
+    quiet(T.request('GET', api('/store/mise/recipes'))).then((c) => { if (Array.isArray(c)) S.copies = c.filter((x) => x?.id && x?.profile?.title); }),
+    quiet(T.request('GET', api('/store/mise/weather'))).then((p) => { if (p && typeof p.latitude === 'number') S.place = p; }),
   ]);
   if (S.cleaning.totalAtClean == null && S.shotsTotal != null) {
     S.cleaning.totalAtClean = S.shotsTotal;
@@ -341,7 +347,9 @@ export const values = {
 };
 
 export function setDose(value) {
-  queuePatch({ context: { targetDoseWeight: roundTo(clamp(value, 5, 30), 0.1) } });
+  const dose = Math.round(clamp(value, 5, 30) * 10) / 10;
+  queuePatch({ context: { targetDoseWeight: dose } });
+  tuneCopy((copy) => { copy.dose = dose; });
 }
 
 export function setOut(value) {
@@ -349,15 +357,23 @@ export function setOut(value) {
   const patch = { context: { targetYield: out } };
   if (out > 0) patch.profile = { target_weight: out };
   queuePatch(patch);
+  tuneCopy((copy) => {
+    copy.out = out;
+    if (out > 0) copy.profile = { ...copy.profile, target_weight: out };
+  });
 }
 
 export function setTemp(value) {
   const steps = stepsAtTemp(S.workflow?.profile, roundTo(clamp(value, 70, 105), 0.5));
-  if (steps) queuePatch({ profile: { steps } });
+  if (!steps) return;
+  queuePatch({ profile: { steps } });
+  tuneCopy((copy) => { copy.profile = { ...copy.profile, steps }; });
 }
 
 export function setGrind(value) {
-  queuePatch({ context: { grinderSetting: String(Math.round(clamp(value, 0, 999) * 100) / 100) } });
+  const grind = String(Math.round(clamp(value, 0, 999) * 100) / 100);
+  queuePatch({ context: { grinderSetting: grind } });
+  tuneCopy((copy) => { copy.grind = grind; });
 }
 
 export function setSteam(patch) { queuePatch({ steamSettings: patch }); }
@@ -378,13 +394,18 @@ async function putWorkflow(body, done) {
   emit();
 }
 
-export function useProfile(record) {
+export function useProfile(record, message) {
   const target = Number(record.profile?.target_weight);
   const body = { profile: record.profile };
-  if (target > 0) body.context = { targetYield: target };
+  const context = {};
+  if (record.copy && record.out != null) context.targetYield = record.out;
+  else if (target > 0) context.targetYield = target;
+  if (record.copy && record.dose) context.targetDoseWeight = record.dose;
+  if (record.copy && record.grind != null && record.grind !== '') context.grinderSetting = String(record.grind);
+  if (Object.keys(context).length) body.context = context;
   S.workflow = deepMerge(S.workflow || {}, body);
   emit();
-  return putWorkflow(body, `Now using ${nameOf(record)}`);
+  return putWorkflow(body, message || `Now using ${nameOf(record)}`);
 }
 
 export function brewAgain(shot) {
@@ -401,8 +422,22 @@ export function brewAgain(shot) {
 
 // ── Recipes and favourites ───────────────────────────────────────────────
 
+// Decaid's recipes followed by your own copies, in one list. A copy looks like
+// a Decaid profile record with `copy: true` and its own dose, yield and grind.
+let listProfiles = null;
+let listCopies = null;
+let listCache = [];
 export function visibleProfiles() {
-  return (S.profiles || []).filter((r) => r?.profile?.title && (r.visibility || 'visible') === 'visible');
+  if (listProfiles === S.profiles && listCopies === S.copies) return listCache;
+  listProfiles = S.profiles;
+  listCopies = S.copies;
+  listCache = (S.profiles || [])
+    .filter((r) => r?.profile?.title && (r.visibility || 'visible') === 'visible')
+    .concat(S.copies.map((c) => ({
+      id: c.id, profile: c.profile, isDefault: false, copy: true,
+      dose: c.dose ?? null, grind: c.grind ?? null, out: c.out ?? null, from: c.from || '',
+    })));
+  return listCache;
 }
 
 export function favoriteIds() {
@@ -608,9 +643,10 @@ function setAlias(record, name) {
 }
 
 export async function renameProfile(record, input) {
-  const name = String(input || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const name = cleanName(input);
   if (!name) { toast('Type a name first.'); return false; }
   const original = record.profile.title;
+  if (record.copy) return renameCopy(record, name);
 
   if (record.isDefault === false && name !== original) {
     try {
@@ -639,7 +675,17 @@ export async function renameProfile(record, input) {
 }
 
 export function openRename(record) {
-  S.dialog = { record };
+  S.dialog = { kind: 'recipe', mode: 'rename', record };
+  emit();
+}
+
+export function openDuplicate(record) {
+  S.dialog = { kind: 'recipe', mode: 'duplicate', record };
+  emit();
+}
+
+export function openCity() {
+  S.dialog = { kind: 'city' };
   emit();
 }
 
@@ -720,4 +766,154 @@ export function openDecaidSettings() {
 
 export function gatewayMode() {
   return S.settings?.gatewayMode || null;
+}
+
+// ── Your copies of recipes ───────────────────────────────────────────────
+// Decaid identifies a recipe by its steps, so it cannot hold two recipes that
+// are identical. A copy you are about to tune starts out identical, so Mise
+// keeps copies itself (key-value store, mise/recipes). Each copy carries the
+// whole recipe plus its own dose, yield and grinder setting, and whatever you
+// change on the Brew screen while a copy is in use is saved back to it.
+
+function cleanName(input) {
+  return String(input || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+function uniqueTitle(wanted, exceptId) {
+  const taken = new Set();
+  for (const r of visibleProfiles()) {
+    if (r.id === exceptId) continue;
+    taken.add(r.profile.title.toLowerCase());
+    taken.add(nameOf(r).toLowerCase());
+  }
+  let title = wanted;
+  for (let n = 2; taken.has(title.toLowerCase()); n += 1) title = `${wanted} ${n}`;
+  return title;
+}
+
+function saveCopies() {
+  clearTimeout(copyTimer);
+  T.request('POST', api('/store/mise/recipes'), S.copies).catch(() => toast('Could not save your copy. Check the connection.'));
+}
+
+function activeCopy() {
+  const title = S.workflow?.profile?.title;
+  return title ? S.copies.find((c) => c.profile.title === title) || null : null;
+}
+
+export function copyInUse() {
+  return Boolean(activeCopy());
+}
+
+let copyTimer = null;
+function tuneCopy(change) {
+  const copy = activeCopy();
+  if (!copy) return;
+  const next = { ...copy };
+  change(next);
+  S.copies = S.copies.map((c) => (c === copy ? next : c));
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(saveCopies, 800);
+}
+
+export async function duplicateProfile(record, input) {
+  const wanted = cleanName(input);
+  if (!wanted) { toast('Type a name for the copy first.'); return false; }
+  const inUse = isInUse(record);
+  const base = inUse && S.workflow?.profile ? S.workflow.profile : record.profile;
+  const title = uniqueTitle(wanted);
+  const grind = values.grind();
+  const copy = {
+    id: `mise:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    profile: { ...JSON.parse(JSON.stringify(base)), title },
+    dose: inUse ? (values.dose() || null) : record.dose ?? null,
+    out: inUse ? values.out() : record.out ?? null,
+    grind: inUse ? (grind === '' ? null : String(grind)) : record.grind ?? null,
+    from: nameOf(record),
+    createdAt: new Date().toISOString(),
+  };
+  const starred = favoriteIds();
+  S.copies = [...S.copies, copy];
+  saveCopies();
+  // Keep the new copy on the Brew screen when there is room for it.
+  if (starred.length < 5) {
+    S.favorites = [...starred, copy.id];
+    quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+  }
+  const made = visibleProfiles().find((r) => r.id === copy.id);
+  await useProfile(made, `Now using your copy, ${title}. Changes on the Brew screen are saved to it.`);
+  return true;
+}
+
+function renameCopy(record, name) {
+  const original = record.profile.title;
+  const title = uniqueTitle(name, record.id);
+  S.copies = S.copies.map((c) => (c.id === record.id ? { ...c, profile: { ...c.profile, title } } : c));
+  if (S.workflow?.profile?.title === original) queuePatch({ profile: { title } });
+  saveCopies();
+  toast(`Renamed to ${title}`);
+  emit();
+  return true;
+}
+
+export function deleteCopy(record) {
+  S.copies = S.copies.filter((c) => c.id !== record.id);
+  saveCopies();
+  if (Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
+    S.favorites = S.favorites.filter((id) => id !== record.id);
+    quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+  }
+  toast(`Deleted your copy, ${record.profile.title}`);
+  emit();
+}
+
+// ── Weather for the sleep screen ─────────────────────────────────────────
+
+let demoWeatherIndex = 0;
+let weatherBusy = false;
+
+export async function loadWeather(force = false) {
+  const demo = S.mode === 'demo';
+  if (!S.place && !demo) { if (S.weather) { S.weather = null; emit(); } return; }
+  if (weatherBusy) return;
+  if (!force && S.weather && Date.now() - S.weather.at < 10 * 60 * 1000) return;
+  weatherBusy = true;
+  try {
+    S.weather = demo ? demoWeather(demoWeatherIndex, S.place?.unit) : await fetchWeather(S.place);
+  } catch {
+    // Keep showing the last reading for a couple of hours, then drop it.
+    if (S.weather && Date.now() - S.weather.at > 2 * 60 * 60 * 1000) S.weather = null;
+  }
+  weatherBusy = false;
+  emit();
+}
+
+export function nextDemoWeather() {
+  demoWeatherIndex += 1;
+  loadWeather(true);
+}
+
+export function findPlaces(query) {
+  return S.mode === 'demo' ? demoPlaces(query) : searchPlaces(query);
+}
+
+function savePlace() {
+  T.request('POST', api('/store/mise/weather'), S.place).catch(() => toast('Could not save the weather city.'));
+}
+
+export function setPlace(place) {
+  S.place = place ? { ...place, unit: S.place?.unit || 'c' } : null;
+  S.weather = null;
+  savePlace();
+  emit();
+  loadWeather(true);
+}
+
+export function setWeatherUnit(unit) {
+  if (!S.place) return;
+  S.place = { ...S.place, unit };
+  S.weather = null;
+  savePlace();
+  emit();
+  loadWeather(true);
 }

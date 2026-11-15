@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.2.0.zip`.
+   **Install skin → ZIP file** and pick `mise-0.3.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -31,6 +31,28 @@ complete settings page for the rest.
 The pencil on a recipe renames it. Recipes you made are renamed in Decaid
 itself. Decaid's built-in recipes cannot be changed, so for those the new name
 is kept by Mise (key-value store, `mise/names`) and shown only in Mise.
+
+## Your own copies of recipes
+
+**Duplicate** (on the Brew screen, or behind the pencil on a recipe card) makes
+your own copy of a recipe and switches to it. While a copy is in use, the dose,
+yield, temperature and grinder setting you change on the Brew screen are saved
+to the copy; the original is never touched. Switching back to a copy restores
+all four numbers.
+
+Decaid identifies a recipe by its steps, so it cannot store two identical
+recipes. Copies are therefore kept by Mise in Decaid's key-value store
+(`mise/recipes`). Other skins do not list them, but shots pulled with a copy
+are saved in Decaid's history under the copy's name.
+
+## Sleep screen and weather
+
+The sleep screen shows the time, the date and, once you choose a city under
+Settings > Sleep screen, the current weather with a sky to match. Weather comes
+from [Open-Meteo](https://open-meteo.com/) (free for non-commercial use, data
+under CC BY 4.0). The only thing sent is the latitude and longitude of the
+chosen city, straight from the tablet to Open-Meteo. Without a city, or without
+an internet connection, the screen shows the time only.
 
 ## Leaving the skin
 
@@ -78,6 +100,7 @@ To point the skin at Decaid on another device while developing, add
     src/api.js           REST and WebSocket transport
     src/sim.js           the pretend machine behind demo mode
     src/chart.js         shot chart and recipe-shape preview
+    src/weather.js       weather lookup for the sleep screen
     src/views/           one file per screen
     fonts/               Inter and Space Grotesk (SIL Open Font License)
 

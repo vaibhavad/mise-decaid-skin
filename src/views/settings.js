@@ -4,7 +4,7 @@
 import { h, setText, show } from '../dom.js';
 import {
   S, updateSettings, updatePresence, setBrightness, setSteam, setCleanInterval,
-  openDecaidSettings, gatewayMode,
+  openDecaidSettings, gatewayMode, openCity, setWeatherUnit,
 } from '../store.js';
 import { num, clamp } from '../format.js';
 import { toggleRow, choiceRow, numberRow, card } from './parts.js';
@@ -102,6 +102,16 @@ export function createSettings() {
     }),
   };
 
+  const cityHint = h('span', { class: 'set-hint' });
+  const cityRow = h('div', { class: 'set-row' },
+    h('div', { class: 'set-text' }, h('span', { class: 'set-label', text: 'Weather city' }), cityHint),
+    h('button', { class: 'btn btn-outline btn-small', type: 'button', onClick: openCity, text: 'Choose city' }));
+  rows.weatherUnit = choiceRow({
+    label: 'Temperature on the sleep screen', hint: '',
+    options: [{ label: '°C', value: 'c' }, { label: '°F', value: 'f' }],
+    read: () => (S.place ? S.place.unit || 'c' : null), write: setWeatherUnit,
+  });
+
   const unavailable = h('p', { class: 'set-note', text: 'Decaid\'s settings could not be read just now, so some switches are greyed out.' });
   const versions = h('span', { class: 'muted small' });
 
@@ -113,6 +123,7 @@ export function createSettings() {
       h('div', { class: 'settings-col' },
         card('set-card', h('h2', { class: 'card-title', text: 'Shots' }), unavailable,
           rows.mode.el, rows.needScale.el, rows.lockTare.el, rows.waterWeight.el),
+        card('set-card', h('h2', { class: 'card-title', text: 'Sleep screen' }), cityRow, rows.weatherUnit.el),
         card('set-card', h('h2', { class: 'card-title', text: 'Mise' }), rows.cleanEvery.el,
           h('div', { class: 'set-row' },
             h('div', { class: 'set-text' },
@@ -131,6 +142,9 @@ export function createSettings() {
     if (t > 0) lastSteamTemp = t;
     for (const r of Object.values(rows)) r.update();
     show(unavailable, !S.settings);
+    setText(cityHint, S.place
+      ? `${[S.place.name, S.place.region].filter(Boolean).join(', ')}. The sleep screen shows its weather.`
+      : 'Not set. The sleep screen shows the time only.');
     const bits = [`Mise ${document.documentElement.dataset.miseVersion || ''}`.trim()];
     if (S.build?.fullVersion || S.build?.version) bits.push(`Decaid ${S.build.fullVersion || S.build.version}`);
     if (S.info?.model) bits.push(String(S.info.model));
