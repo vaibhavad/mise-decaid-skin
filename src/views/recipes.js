@@ -4,13 +4,13 @@
 
 import { h, setAttr, replaceKids, icon, setText } from '../dom.js';
 import {
-  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite,
+  S, visibleProfiles, favoriteIds, toggleFavorite, openRecipe, isInUse, nameOf, moveFavorite, openImport, openExport,
 } from '../store.js';
 import { firstSentence, deg, num } from '../format.js';
 import { profileCurve } from '../chart.js';
 import { sheetHead } from './parts.js';
 
-const FILTERS = ['All', 'Starred', 'Your copies', 'Espresso', 'Filter and tea', 'Cleaning'];
+const FILTERS = ['All', 'Starred', 'Your copies', 'Espresso', 'Filter and tea', 'Cleaning', 'Hidden'];
 const SORTS = [{ key: 'name', label: 'A–Z' }, { key: 'recent', label: 'Recently brewed' }];
 
 export function kind(profile) {
@@ -29,7 +29,11 @@ export function createRecipes() {
 
   const search = h('input', { class: 'input input-search', type: 'search', autocomplete: 'off', placeholder: 'Search recipes', 'aria-label': 'Search recipes' });
   search.addEventListener('input', () => { query = search.value.trim().toLowerCase(); update(); });
-  const head = sheetHead({ title: 'Recipes', right: [search] });
+  const head = sheetHead({ title: 'Recipes', right: [
+    search,
+    h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Import', onClick: openImport }),
+    h('button', { class: 'btn btn-outline btn-small', type: 'button', text: 'Export', onClick: () => openExport() }),
+  ] });
   const chips = FILTERS.map((name) => h('button', { class: 'filter', type: 'button', text: name, onClick: () => { filter = name; update(); } }));
   const sorts = SORTS.map((s) => h('button', { class: 'filter filter-quiet', type: 'button', text: s.label, onClick: () => { sort = s.key; update(); } }));
   const grid = h('div', { class: 'recipe-grid' });
@@ -57,15 +61,17 @@ export function createRecipes() {
     const all = visibleProfiles();
     const favs = favoriteIds();
     const current = S.workflow?.profile?.title || '';
-    const next = `${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${sort}|${query}|${all.map(nameOf).join('\u0001')}|${(S.shots || []).length}|${S.layout.unit}`;
+    const next = `${S.hiddenProfiles.map((r) => r.id).join(',')}|${S.profiles ? all.length : 'loading'}|${favs.join(',')}|${current}|${filter}|${sort}|${query}|${all.map(nameOf).join('\u0001')}|${(S.shots || []).length}|${S.layout.unit}`;
     if (next === key) return;
     key = next;
     setText(head.subEl, S.profiles ? `${all.length} recipes · ${favs.length} of 5 starred for the Brew screen` : '');
-    setText(tip, filter === 'Starred' ? 'Use the arrows to set the order they appear on the Brew screen.' : 'Tap a recipe to see it in full and load it. The star keeps it on the Brew screen.');
+    setText(tip, filter === 'Starred' ? 'Use the arrows to set the order they appear on the Brew screen.'
+      : filter === 'Hidden' ? 'Recipes you hid. Open one to show it again.'
+        : 'Tap a recipe to see it in full and load it. The star keeps it on the Brew screen.');
 
     if (!S.profiles) { replaceKids(grid, [h('p', { class: 'muted empty', text: 'Loading recipes…' })]); return; }
     const recent = lastBrewed();
-    let shown = all.filter((record) => {
+    let shown = (filter === 'Hidden' ? S.hiddenProfiles : all).filter((record) => {
       const p = record.profile;
       if (filter === 'Starred' && !favs.includes(record.id)) return false;
       if (filter === 'Your copies' && !record.copy) return false;
@@ -78,12 +84,13 @@ export function createRecipes() {
     else shown.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
     if (!shown.length) {
-      replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'Nothing starred yet. Tap a star to add a recipe to the Brew screen.' : filter === 'Your copies' ? 'No copies yet. Duplicate a recipe to make one you can tune.' : 'No recipes match.' })]);
+      replaceKids(grid, [h('p', { class: 'muted empty', text: filter === 'Starred' ? 'Nothing starred yet. Tap a star to add a recipe to the Brew screen.' : filter === 'Your copies' ? 'No copies yet. Duplicate a recipe to make one you can tune.' : filter === 'Hidden' ? 'No hidden recipes. Hide ones you never use from their page.' : 'No recipes match.' })]);
       return;
     }
     replaceKids(grid, shown.map((record, i) => {
       const p = record.profile;
       const starred = favs.includes(record.id);
+      const hidden = filter === 'Hidden';
       const inUse = isInUse(record);
       const t = Number(p.steps?.[0]?.temperature);
       const out = record.copy && record.out != null ? Number(record.out) : Number(p.target_weight) || 0;
@@ -100,7 +107,7 @@ export function createRecipes() {
             inUse ? h('span', { class: 'pill pill-solid', text: 'In use' }) : null,
             record.copy ? h('span', { class: 'pill', text: 'Your copy' }) : null,
             h('span', { class: 'pill pill-quiet', text: kind(p) }))),
-        h('button', {
+        hidden ? null : h('button', {
           class: 'star', type: 'button', 'aria-pressed': starred ? 'true' : 'false',
           'aria-label': `${starred ? 'Remove star from' : 'Star'} ${nameOf(record)}`,
           onClick: () => toggleFavorite(record.id),

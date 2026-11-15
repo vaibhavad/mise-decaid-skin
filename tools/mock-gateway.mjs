@@ -1,9 +1,9 @@
 // A stand-in for Decaid on port 8080, for testing the skin's real network
 // code without a machine. Wraps the same simulator the demo mode uses.
-// Not shipped in the skin ZIP. Run: npm install && npm run gateway
+// Not shipped in the skin ZIP.
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
-import { createSim } from '../src/sim.js';
+import { createSim } from '../skin/src/sim.js';
 
 const sim = createSim({ ghc: process.env.GHC !== '0' });
 const cors = {
@@ -17,6 +17,9 @@ const server = http.createServer(async (req, res) => {
   let raw = '';
   for await (const chunk of req) raw += chunk;
   const body = raw ? JSON.parse(raw) : undefined;
+  if (req.url === '/__test/timer') {
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(sim.timerLog)); return;
+  }
   if (req.url.startsWith('/__test/press/')) {
     sim.press(req.url.split('/').pop());
     res.writeHead(200, cors); res.end(); return;

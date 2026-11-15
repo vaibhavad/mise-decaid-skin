@@ -2,7 +2,7 @@
 // chart and steps. Compare lays a second shot underneath, faint.
 
 import { h, setText, setAttr, show, replaceKids, icon } from '../dom.js';
-import { S, selectShot, brewAgain, displayTitle, compareWith } from '../store.js';
+import { S, selectShot, brewAgain, displayTitle, compareWith, filterHistory, daysOffRoast } from '../store.js';
 import { num, ratio, when, trimNum, brewTemp, deg, stageStats } from '../format.js';
 import { createChart } from '../chart.js';
 import { sheetHead } from './parts.js';
@@ -10,12 +10,15 @@ import { stageCards } from './shot.js';
 
 export function createHistory() {
   const head = sheetHead({ title: 'History', sub: 'Every shot is saved. Tap one to see it.' });
+  const coffeeChips = h('div', { class: 'filter-group coffee-filter', role: 'group', 'aria-label': 'Coffee' });
+  let chipKey = '';
   const list = h('div', { class: 'shot-list' });
   let listKey = '';
   let picking = false;
 
   const dWhen = h('span', { class: 'val-label' });
   const dTitle = h('h2', { class: 'detail-title' });
+  const dCoffee = h('span', { class: 'muted small' });
   const stat = (label) => {
     const v = h('span', { class: 'stat-num' });
     return { v, el: h('div', { class: 'stat' }, h('span', { class: 'val-label', text: label }), v) };
@@ -39,7 +42,7 @@ export function createHistory() {
   const empty = h('p', { class: 'muted empty', text: 'No shots yet. They appear here as you pull them.' });
   const detail = h('section', { class: 'detail' },
     h('div', { class: 'detail-top' },
-      h('div', { class: 'detail-head' }, dWhen, h('div', { class: 'title-row' }, dTitle, taste)),
+      h('div', { class: 'detail-head' }, dWhen, h('div', { class: 'title-row' }, dTitle, taste), dCoffee),
       h('div', { class: 'detail-actions' }, compareBtn, again)),
     h('div', { class: 'stat-row' }, sOut.el, sTime.el, sRatio.el, sDose.el, sGrind.el, sTemp.el),
     cmpBar,
@@ -49,6 +52,7 @@ export function createHistory() {
 
   const el = h('div', { class: 'sheet-body view-history' },
     head.el,
+    coffeeChips,
     h('div', { class: 'history-body' },
       h('div', { class: 'list-col' }, pickHint, list),
       detail, empty));
@@ -82,25 +86,47 @@ export function createHistory() {
         },
       },
       h('span', { class: 'shot-row-top' }, h('strong', { text: when(shot.timestamp) }), f.taste ? h('span', { class: 'pill pill-quiet', text: f.taste }) : null),
-      h('span', { class: 'muted', text: displayTitle(shot.workflow?.profile?.title) || 'Espresso' }),
+      h('span', { class: 'muted', text: [displayTitle(shot.workflow?.profile?.title) || 'Espresso', shot.workflow?.context?.coffeeName].filter(Boolean).join(' · ') }),
       h('span', { class: 'shot-row-nums', text: [f.dose && f.out ? `${num(f.dose, 1)} → ${num(f.out, 1)} g` : (f.out ? `${num(f.out, 1)} g` : null), f.seconds ? `${Math.round(f.seconds)} s` : null].filter(Boolean).join(' · ') }));
     }));
   }
 
+  function coffeeFor(shot) {
+    const ctx = shot.workflow?.context || {};
+    const batch = ctx.beanBatchId ? S.batches.find((b) => b.id === ctx.beanBatchId) : null;
+    const age = batch ? daysOffRoast(batch, Date.parse(shot.timestamp)) : null;
+    return [ctx.coffeeName, ctx.coffeeRoaster, age != null ? `${age} days off roast` : null].filter(Boolean).join(' · ');
+  }
+
+  function updateChips() {
+    const beans = S.beans.filter((b) => !b.archived || b.id === S.historyBean);
+    const key = `${beans.map((b) => b.id).join(',')}|${S.historyBean}`;
+    if (key === chipKey) return;
+    chipKey = key;
+    replaceKids(coffeeChips, beans.length ? [
+      h('button', { class: 'filter', type: 'button', text: 'All coffees', 'aria-pressed': String(!S.historyBean), onClick: () => filterHistory(null) }),
+      ...beans.map((b) => h('button', { class: 'filter', type: 'button', text: b.name, 'aria-pressed': String(S.historyBean === b.id), onClick: () => filterHistory(b.id) })),
+    ] : []);
+    show(coffeeChips, beans.length > 0);
+  }
+
   let drawnKey = '';
   function update() {
+    updateChips();
     updateList();
     show(pickHint, picking);
     setAttr(compareBtn, 'aria-pressed', picking || S.compareShot ? 'true' : 'false');
     const shot = (S.shots || []).find((s) => s.id === S.selectedShot) || null;
     show(detail, Boolean(shot));
     show(empty, !shot && !(S.shots || []).length);
+    setText(empty, S.historyBean ? 'No shots with this coffee yet.' : 'No shots yet. They appear here as you pull them.');
     if (!shot) return;
     const d = S.shotDetails[shot.id];
     const f = figures(shot);
     const ctx = shot.workflow?.context || {};
     setText(dWhen, when(shot.timestamp));
     setText(dTitle, displayTitle(shot.workflow?.profile?.title) || 'Espresso');
+    setText(dCoffee, coffeeFor(shot));
     show(taste, Boolean(f.taste));
     setText(taste, f.taste);
     setText(sOut.v, f.out ? `${num(f.out, 1)} g` : '–');

@@ -5,7 +5,7 @@ import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot, sample
 import { fetchWeather, searchPlaces, demoWeather, demoPlaces } from './weather.js';
 
 export const UTILITY_CARDS = ['hotWater', 'steam', 'flush', 'scale'];
-export const DEFAULT_LAYOUT = { cards: UTILITY_CARDS.slice(), hidden: [], tank: true, last: true, unit: 'c', screenOff: 0 };
+export const DEFAULT_LAYOUT = { cards: UTILITY_CARDS.slice(), hidden: [], tank: true, last: true, unit: 'c', screenOff: 0, deductDose: true, scaleTimer: true };
 
 export const S = {
   mode: 'connecting',        // connecting | live | demo | offline
@@ -43,6 +43,13 @@ export const S = {
   editor: null,              // the value being edited with the ruler
   utility: null,             // steam, hot water or flush while it runs
   compareShot: null,         // shot laid under the selected one in History
+  beans: [],                 // coffee library (archived ones included)
+  batches: [],               // bags of each coffee (archived ones included)
+  historyBean: null,         // History shows only this coffee's shots
+  hiddenProfiles: [],        // recipes you hid
+  lineage: {},               // recipe id -> its versions
+  machineSettings: null,     // fan, tank, purge mode…
+  advanced: null,            // heater settings
 };
 
 let T = null;                // transport: { request, stream, demo }
@@ -115,6 +122,7 @@ export async function loadAll() {
     quiet(T.request('GET', api('/store/mise/recipes'))).then((c) => { if (Array.isArray(c)) S.copies = c.filter((x) => x?.id && x?.profile?.title); }),
     quiet(T.request('GET', api('/store/mise/weather'))).then((p) => { if (p && typeof p.latitude === 'number') S.place = p; }),
     quiet(T.request('GET', api('/store/mise/layout'))).then((l) => { if (l && typeof l === 'object' && !Array.isArray(l)) applyLayout(l); }),
+    loadCoffees(),
   ]);
   if (S.cleaning.totalAtClean == null && S.shotsTotal != null) {
     S.cleaning.totalAtClean = S.shotsTotal;
@@ -147,7 +155,8 @@ async function loadWorkflow() {
 }
 
 export async function loadShots() {
-  const page = await quiet(T.request('GET', api('/shots?limit=30&offset=0')));
+  const filter = S.historyBean ? `&beanId=${encodeURIComponent(S.historyBean)}` : '';
+  const page = await quiet(T.request('GET', api(`/shots?limit=30&offset=0${filter}`)));
   const items = Array.isArray(page) ? page : page?.items;
   if (!Array.isArray(items)) return;
   S.shots = items.slice().sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
@@ -211,10 +220,11 @@ function onSnapshot(snap) {
   if (state === 'espresso') {
     if (!S.shot) {
       S.shot = { phase: 'prep', t0: null, seconds: 0, samples: [], frame: 0, id: null, startedAt: Date.now() };
+      scaleTimer('reset');
     }
     const shot = S.shot;
     if (sub === 'preinfusion' || sub === 'pouring') {
-      if (shot.t0 === null) shot.t0 = ts;
+      if (shot.t0 === null) { shot.t0 = ts; scaleTimer('start'); }
       shot.phase = 'running';
       shot.seconds = Math.max(0, (ts - shot.t0) / 1000);
       shot.frame = Number(snap.profileFrame) || 0;
@@ -224,6 +234,7 @@ function onSnapshot(snap) {
       shot.samples.push(sampleFrom(snap, shot.seconds, weight));
     } else if (shot.phase === 'running') {
       shot.phase = 'ending';
+      scaleTimer('stop');
     }
   } else if (S.shot) {
     finishShot();
@@ -247,8 +258,16 @@ function trackUtility(state) {
   }
 }
 
+// Decaid runs the scale's timer with the shot by itself, except in Full
+// gateway mode, where it leaves the shot to the skin. Then Mise does it.
+function scaleTimer(action) {
+  if (S.layout.scaleTimer === false || gatewayMode() !== 'full' || !S.scaleConnected) return;
+  quiet(T.request('PUT', api(`/scale/timer/${action}`)));
+}
+
 function finishShot() {
   const shot = S.shot;
+  if (shot.phase === 'running') scaleTimer('stop');
   S.shot = null;
   if (shot.t0 === null || shot.seconds < 5) return; // never really poured
   const previous = S.shots?.[0] ? S.shotDetails[S.shots[0].id] : null;
@@ -265,6 +284,7 @@ function finishShot() {
     out: S.scaleConnected && S.scale.weight != null ? S.scale.weight : null,
     samples: shot.samples,
     steps: S.workflow?.profile?.steps || [],
+    batchId: context.beanBatchId || null,
     id: shot.id,
     notes: '',
     taste: null,
@@ -291,6 +311,7 @@ function findSavedShot(attempt) {
     if (!match) { findSavedShot(attempt + 1); return; }
     review.id = match.id;
     review.recordFound = true;
+    deductDose(review);
     await saveReview();
   }, waits[attempt]);
 }
@@ -422,10 +443,11 @@ export function useProfile(record, message) {
   const target = Number(record.profile?.target_weight);
   const body = { profile: record.profile };
   const context = {};
+  const saved = record.copy ? record : (record.metadata?.mise || {});
   if (record.copy && record.out != null) context.targetYield = record.out;
   else if (target > 0) context.targetYield = target;
-  if (record.copy && record.dose) context.targetDoseWeight = record.dose;
-  if (record.copy && record.grind != null && record.grind !== '') context.grinderSetting = String(record.grind);
+  if (saved.dose) context.targetDoseWeight = saved.dose;
+  if (saved.grind != null && saved.grind !== '') context.grinderSetting = String(saved.grind);
   if (Object.keys(context).length) body.context = context;
   S.workflow = deepMerge(S.workflow || {}, body);
   emit();
@@ -459,9 +481,14 @@ export function visibleProfiles() {
     .filter((r) => r?.profile?.title && (r.visibility || 'visible') === 'visible')
     .concat(S.copies.map((c) => ({
       id: c.id, profile: c.profile, isDefault: false, copy: true,
-      dose: c.dose ?? null, grind: c.grind ?? null, out: c.out ?? null, from: c.from || '',
+      dose: c.dose ?? null, grind: c.grind ?? null, out: c.out ?? null, from: c.from || '', fromId: c.fromId || null,
     })));
   return listCache;
+}
+
+// Any recipe by id, including ones you hid.
+export function findRecord(id) {
+  return visibleProfiles().find((r) => r.id === id) || S.hiddenProfiles.find((r) => r.id === id) || null;
 }
 
 export function favoriteIds() {
@@ -575,6 +602,9 @@ export function setCleanInterval(value) {
 export function go(view) {
   S.view = view;
   if (view === 'settings') loadSettings();
+  if (view === 'coffees') loadCoffees();
+  if (view === 'recipes') loadHidden();
+  if (view === 'recipe') loadLineage(S.recipeId);
   if (view === 'history') {
     if (!S.selectedShot && S.shots?.[0]) selectShot(S.shots[0].id);
     backfillTimes();
@@ -807,6 +837,27 @@ export function toggleCard(card) {
   updateLayout({ hidden });
 }
 
+export function openForm(spec) {
+  S.dialog = { kind: 'form', ...spec };
+  emit();
+}
+
+export function openImport() {
+  S.dialog = { kind: 'import' };
+  emit();
+}
+
+export async function openExport(record = null) {
+  if (record) {
+    const name = (record.profile.title || 'recipe').replace(/[^\w\- ]+/g, '').trim() || 'recipe';
+    S.dialog = { kind: 'export', title: `Export ${nameOf(record)}`, data: record.profile, filename: `${name}.json` };
+  } else {
+    const data = await exportRecipes();
+    S.dialog = { kind: 'export', title: 'Export all recipes', data, filename: `mise-recipes-${new Date().toISOString().slice(0, 10)}.json` };
+  }
+  emit();
+}
+
 export function closeDialog() {
   S.dialog = null;
   emit();
@@ -825,6 +876,7 @@ export async function loadSettings() {
   if (presence && typeof presence === 'object') S.presence = presence;
   if (display && typeof display === 'object') S.display = display;
   if (build && typeof build === 'object') S.build = build;
+  loadMachineSettings();
   emit();
 }
 
@@ -948,6 +1000,7 @@ export async function duplicateProfile(record, input) {
     out: inUse ? values.out() : record.out ?? null,
     grind: inUse ? (grind === '' ? null : String(grind)) : record.grind ?? null,
     from: nameOf(record),
+    fromId: record.copy ? (record.fromId || null) : record.id,
     createdAt: new Date().toISOString(),
   };
   const starred = favoriteIds();
@@ -1036,4 +1089,295 @@ export function setWeatherUnit(unit) {
   savePlace();
   emit();
   loadWeather(true);
+}
+
+
+// ── Coffee library ───────────────────────────────────────────────────────
+// Coffees and their bags live in Decaid (/beans and /bean-batches), so every
+// skin and Visualizer uploads see the same library. The bag in use is linked
+// through the workflow (context.beanBatchId), so each shot records it.
+
+export async function loadCoffees() {
+  const [beans, batches] = await Promise.all([
+    quiet(T.request('GET', api('/beans?includeArchived=true'))),
+    quiet(T.request('GET', api('/bean-batches?includeArchived=true'))),
+  ]);
+  if (Array.isArray(beans)) S.beans = beans;
+  if (Array.isArray(batches)) S.batches = batches;
+  emit();
+}
+
+export function currentBatch() {
+  const id = S.workflow?.context?.beanBatchId;
+  return id ? S.batches.find((b) => b.id === id) || null : null;
+}
+
+export function beanOf(batch) {
+  return batch ? S.beans.find((b) => b.id === batch.beanId) || null : null;
+}
+
+// Days since roasting, leaving out any time the bag spent in the freezer.
+export function daysOffRoast(batch, at = Date.now()) {
+  const roast = Date.parse(batch?.roastDate || '');
+  if (!Number.isFinite(roast)) return null;
+  let frozen = 0;
+  const f = Date.parse(batch.freezeDate || '');
+  if (Number.isFinite(f) && f >= roast) {
+    const u = batch.frozen ? at : Date.parse(batch.unfreezeDate || '');
+    if (Number.isFinite(u) && u > f) frozen = u - f;
+  }
+  return Math.max(0, Math.floor((at - roast - frozen) / 86400000));
+}
+
+export async function useBatch(batch) {
+  const bean = beanOf(batch);
+  if (!bean) return;
+  await putWorkflow({ context: { beanBatchId: batch.id, coffeeName: bean.name, coffeeRoaster: bean.roaster } }, `Now using ${bean.name}`);
+}
+
+export async function clearCoffee() {
+  await putWorkflow({ context: { beanBatchId: null, coffeeName: '', coffeeRoaster: '' } }, 'No coffee selected');
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+export async function saveBean(fields, id = null) {
+  try {
+    const bean = id
+      ? await T.request('PUT', api(`/beans/${encodeURIComponent(id)}`), fields)
+      : await T.request('POST', api('/beans'), fields);
+    await loadCoffees();
+    toast(id ? 'Coffee saved' : `Added ${fields.name}`);
+    return bean;
+  } catch {
+    toast('That coffee could not be saved. Check the connection and try again.');
+    return null;
+  }
+}
+
+export async function saveBatch(beanId, fields, id = null) {
+  try {
+    const batch = id
+      ? await T.request('PUT', api(`/bean-batches/${encodeURIComponent(id)}`), fields)
+      : await T.request('POST', api(`/beans/${encodeURIComponent(beanId)}/batches`), fields);
+    await loadCoffees();
+    toast(id ? 'Bag saved' : 'Bag added');
+    return batch;
+  } catch {
+    toast('That bag could not be saved. Check the connection and try again.');
+    return null;
+  }
+}
+
+export function setFrozen(batch, frozen) {
+  return saveBatch(batch.beanId, frozen ? { frozen: true, freezeDate: today(), unfreezeDate: null } : { frozen: false, unfreezeDate: today() }, batch.id);
+}
+
+export function archiveBatch(batch, archived = true) {
+  return saveBatch(batch.beanId, { archived }, batch.id);
+}
+
+export function archiveBean(bean, archived = true) {
+  return saveBean({ archived }, bean.id);
+}
+
+export async function deleteBean(bean) {
+  try {
+    await T.request('DELETE', api(`/beans/${encodeURIComponent(bean.id)}`));
+    if (S.historyBean === bean.id) S.historyBean = null;
+    await loadCoffees();
+    toast(`Deleted ${bean.name}`);
+  } catch {
+    toast('That coffee could not be deleted.');
+  }
+}
+
+// Decaid keeps how much is left in each bag but does not count it down, so
+// Mise takes each shot's dose off the bag it was pulled with.
+async function deductDose(review) {
+  if (review.deducted || S.layout.deductDose === false) return;
+  review.deducted = true;
+  const batch = review.batchId ? S.batches.find((b) => b.id === review.batchId) : null;
+  const dose = Number(review.dose);
+  if (!batch || !(dose > 0)) return;
+  const left = Number(batch.weightRemaining ?? batch.weight);
+  if (!Number.isFinite(left)) return;
+  const next = Math.max(0, Math.round((left - dose) * 10) / 10);
+  try {
+    await T.request('PUT', api(`/bean-batches/${encodeURIComponent(batch.id)}`), { weightRemaining: next });
+    batch.weightRemaining = next;
+    emit();
+  } catch { /* the next shot tries again with fresh numbers */ }
+}
+
+export function filterHistory(beanId) {
+  S.historyBean = beanId || null;
+  S.selectedShot = null;
+  S.compareShot = null;
+  loadShots().then(() => { if (S.shots?.[0]) selectShot(S.shots[0].id); });
+  emit();
+}
+
+// ── Recipe management ────────────────────────────────────────────────────
+
+export async function loadHidden() {
+  const list = await quiet(T.request('GET', api('/profiles?visibility=hidden')));
+  if (Array.isArray(list)) { S.hiddenProfiles = list; emit(); }
+}
+
+async function reloadProfiles() {
+  const list = await quiet(T.request('GET', api('/profiles')));
+  if (Array.isArray(list)) S.profiles = list;
+  await loadHidden();
+  emit();
+}
+
+export async function setHidden(record, hidden) {
+  try {
+    await T.request('PUT', api(`/profiles/${encodeURIComponent(record.id)}/visibility`), { visibility: hidden ? 'hidden' : 'visible' });
+    if (hidden && Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
+      S.favorites = S.favorites.filter((id) => id !== record.id);
+      quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+    }
+    await reloadProfiles();
+    toast(hidden ? `Hid ${nameOf(record)}. Find it under Hidden in Recipes.` : `${nameOf(record)} is back in your recipes`);
+  } catch {
+    toast('That recipe could not be changed.');
+  }
+}
+
+export async function loadLineage(id) {
+  if (!id || id.startsWith('mise:')) return;
+  const list = await quiet(T.request('GET', api(`/profiles/${encodeURIComponent(id)}/lineage`)));
+  if (Array.isArray(list)) { S.lineage = { ...S.lineage, [id]: list }; emit(); }
+}
+
+// A tuned copy becomes a real Decaid recipe, linked to the recipe it came
+// from, so other skins and Visualizer see it. Its dose and grind travel in
+// the recipe's metadata. Decaid gives identical recipes the same ID, so a
+// copy that has not been changed yet cannot be saved on its own.
+export async function saveCopyToDecaid(record) {
+  if (!record?.copy) return false;
+  const all = visibleProfiles();
+  const parent = (record.fromId && all.find((r) => r.id === record.fromId)) || all.find((r) => !r.copy && (r.profile.title === record.from || nameOf(r) === record.from));
+  try {
+    const made = await T.request('POST', api('/profiles'), {
+      profile: record.profile,
+      parentId: parent?.id || null,
+      metadata: { mise: { dose: record.dose ?? null, grind: record.grind ?? null } },
+    });
+    if (!made?.id || made.profile?.title !== record.profile.title) {
+      toast(`This copy is still the same as ${made?.profile?.title || 'another recipe'}. Change its temperature or espresso out first.`);
+      return false;
+    }
+    S.copies = S.copies.filter((c) => c.id !== record.id);
+    saveCopies();
+    if (Array.isArray(S.favorites) && S.favorites.includes(record.id)) {
+      S.favorites = S.favorites.map((id) => (id === record.id ? made.id : id));
+      quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+    }
+    if (S.recipeId === record.id) S.recipeId = made.id;
+    await reloadProfiles();
+    toast(`${record.profile.title} is now a Decaid recipe`);
+    return true;
+  } catch {
+    toast('Decaid could not save that recipe.');
+    return false;
+  }
+}
+
+// For a recipe you made in Decaid: write the Brew screen's temperature and
+// espresso out (and dose and grind) back into it.
+export function brewChanges(record) {
+  if (!record || record.copy || record.isDefault !== false || !isInUse(record)) return false;
+  const wf = S.workflow?.profile;
+  if (!wf) return false;
+  const stored = record.profile;
+  const t1 = Number(stored.steps?.[0]?.temperature);
+  const t2 = Number(wf.steps?.[0]?.temperature);
+  const out = values.out();
+  const m = record.metadata?.mise || {};
+  return Math.abs(t1 - t2) > 0.01 || (out > 0 && out !== Number(stored.target_weight))
+    || (values.dose() && values.dose() !== Number(m.dose)) || (String(values.grind()) !== String(m.grind ?? ''));
+}
+
+export async function saveBrewChanges(record) {
+  const out = values.out();
+  const profile = { ...record.profile, steps: S.workflow.profile.steps };
+  if (out > 0) profile.target_weight = out;
+  const grind = values.grind();
+  try {
+    const updated = await T.request('PUT', api(`/profiles/${encodeURIComponent(record.id)}`), {
+      profile,
+      metadata: { ...(record.metadata || {}), mise: { dose: values.dose() || null, grind: grind === '' ? null : String(grind) } },
+    });
+    const next = updated?.profile ? updated : { ...record, profile };
+    S.profiles = (S.profiles || []).map((r) => (r.id === record.id ? next : r));
+    if (next.id !== record.id) {
+      if (Array.isArray(S.favorites)) S.favorites = S.favorites.map((id) => (id === record.id ? next.id : id));
+      quiet(T.request('POST', api('/store/mise/favorites'), S.favorites));
+      if (S.recipeId === record.id) S.recipeId = next.id;
+    }
+    toast(`Saved your Brew screen changes into ${nameOf(next)}`);
+    emit();
+  } catch {
+    toast('Decaid could not save those changes.');
+  }
+}
+
+export async function exportRecipes() {
+  const list = await quiet(T.request('GET', api('/profiles/export')));
+  const records = Array.isArray(list) ? list : [];
+  for (const c of S.copies) records.push({ profile: c.profile, parentId: c.fromId || null, metadata: { mise: { dose: c.dose, grind: c.grind, copy: true } } });
+  return records;
+}
+
+// Accepts Decaid's export (an array of records), a list of plain recipes, or
+// one recipe as de1app, Visualizer and Decaid write it.
+export async function importRecipes(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { toast('That is not a recipe file. It should be JSON.'); return null; }
+  const items = Array.isArray(data) ? data : [data];
+  const records = items
+    .map((x) => (x && x.profile && Array.isArray(x.profile.steps) ? x : (x && Array.isArray(x.steps) ? { profile: x } : null)))
+    .filter(Boolean);
+  if (!records.length) { toast('No recipes found in that file.'); return null; }
+  try {
+    const result = await T.request('POST', api('/profiles/import'), records);
+    await reloadProfiles();
+    const added = Number(result?.imported) || 0;
+    const skipped = Number(result?.skipped) || 0;
+    toast(`${added} ${added === 1 ? 'recipe' : 'recipes'} added${skipped ? `, ${skipped} already here` : ''}`);
+    return result;
+  } catch {
+    toast('Decaid could not import those recipes.');
+    return null;
+  }
+}
+
+// ── Machine settings ─────────────────────────────────────────────────────
+
+export async function loadMachineSettings() {
+  const [m, a] = await Promise.all([
+    quiet(T.request('GET', api('/machine/settings'))),
+    quiet(T.request('GET', api('/machine/settings/advanced'))),
+  ]);
+  if (m && typeof m === 'object') S.machineSettings = m;
+  if (a && typeof a === 'object') S.advanced = a;
+  emit();
+}
+
+export async function updateMachineSetting(patch, advanced = false) {
+  const key = advanced ? 'advanced' : 'machineSettings';
+  if (!S[key]) return;
+  const before = S[key];
+  S[key] = { ...before, ...patch };
+  emit();
+  try {
+    await T.request('POST', api(advanced ? '/machine/settings/advanced' : '/machine/settings'), patch);
+  } catch {
+    S[key] = before;
+    toast(NOT_SAVED);
+  }
+  emit();
 }

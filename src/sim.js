@@ -156,11 +156,30 @@ export function createSim(options = {}) {
     } catch { /* start empty */ }
   }
 
-  const profiles = DEMO_PROFILES.map((p, i) => ({
-    id: `profile:demo${i + 1}`, profile: clone(p), parentId: null,
+  const profiles = DEMO_PROFILES.map((p) => ({
+    id: profileId(p), profile: clone(p), parentId: null,
     // One user-made recipe, so both kinds of rename can be tried in the demo.
     visibility: 'visible', isDefault: p.title !== 'Long and light', metadata: {},
   }));
+
+  // Coffee library: two coffees, three bags.
+  const day = 24 * 3600 * 1000;
+  const dateOnly = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const stamp = new Date(now()).toISOString();
+  const beans = [
+    { id: 'bean-guji', roaster: 'Demo roaster', name: 'Ethiopia Guji, washed', country: 'Ethiopia', processing: 'washed', notes: 'Peach, jasmine, black tea.', decaf: false, archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'bean-cerrado', roaster: 'Demo roaster', name: 'Brazil Cerrado, natural', country: 'Brazil', processing: 'natural', notes: 'Chocolate, hazelnut.', decaf: false, archived: false, createdAt: stamp, updatedAt: stamp },
+  ];
+  const batches = [
+    { id: 'batch-guji-1', beanId: 'bean-guji', roastDate: dateOnly(now() - 11 * day), roastLevel: 'light', weight: 250, weightRemaining: 182, frozen: false, archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'batch-cerrado-1', beanId: 'bean-cerrado', roastDate: dateOnly(now() - 30 * day), roastLevel: 'medium', weight: 1000, weightRemaining: 640, frozen: true, freezeDate: dateOnly(now() - 26 * day), archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'batch-cerrado-0', beanId: 'bean-cerrado', roastDate: dateOnly(now() - 70 * day), roastLevel: 'medium', weight: 250, weightRemaining: 0, frozen: false, archived: true, createdAt: stamp, updatedAt: stamp },
+  ];
+  let machineSettings = { usb: true, fan: 50, flushTemp: 90, flushFlow: 6, flushTimeout: 5, hotWaterFlow: 6, steamFlow: 0.8, tankTemp: 0, steamPurgeMode: 0 };
+  let advanced = { heaterPh1Flow: 2.5, heaterPh2Flow: 5, heaterIdleTemp: 99, heaterPh2Timeout: 10, heaterVoltage: 120, refillKitSetting: 2 };
+  const timerLog = [];
+  let uid = 0;
+  const newId = (prefix) => `${prefix}-${Date.now().toString(36)}${(uid += 1)}`;
 
   let workflow = {
     id: 'demo-workflow', name: 'Demo', description: '',
@@ -168,6 +187,7 @@ export function createSim(options = {}) {
     context: {
       targetDoseWeight: 18, targetYield: 36, grinderModel: 'Demo grinder', grinderSetting: '12',
       coffeeName: 'Ethiopia Guji, washed', coffeeRoaster: 'Demo roaster', finalBeverageType: 'espresso',
+      beanBatchId: 'batch-guji-1',
     },
     steamSettings: { targetTemperature: 150, duration: 45, flow: 0.8 },
     hotWaterData: { targetTemperature: 90, duration: 30, volume: 120, flow: 6 },
@@ -178,6 +198,8 @@ export function createSim(options = {}) {
     gatewayMode: 'tracking', logLevel: 'INFO', weightFlowMultiplier: 1, volumeFlowMultiplier: 0.3,
     hotWaterFlowMultiplier: 0.3, scalePowerMode: 'disconnect', blockOnNoScale: false,
     blockTareDuringShot: false, stopHotWaterAtWeight: true, themeMode: 'system',
+    keepAwake: true, chargingMode: 'balanced', nightModeEnabled: false, nightModeSleepTime: 1380,
+    nightModeMorningTime: 360, lowBatteryBrightnessLimit: true,
   };
   let presence = { userPresenceEnabled: true, sleepTimeoutMinutes: 30 };
   const display = {
@@ -230,7 +252,7 @@ export function createSim(options = {}) {
         workflow: {
           name: 'Demo',
           profile: clone(DEMO_PROFILES[item.p]),
-          context: { ...workflow.context, targetYield: item.yield, grinderSetting: item.grind },
+          context: { ...workflow.context, targetYield: item.yield, grinderSetting: item.grind, ...(item.p === 2 ? { beanBatchId: 'batch-cerrado-1', coffeeName: 'Brazil Cerrado, natural' } : {}) },
         },
         annotations: { actualDoseWeight: 18, actualYield: Math.round((sim.w + 1.1) * 10) / 10 },
         stopReason: 'targetWeight',
@@ -393,6 +415,15 @@ export function createSim(options = {}) {
     return rest;
   }
 
+  // Like Decaid, a recipe's ID comes from what the machine runs, so two
+  // recipes with the same steps, temperatures and targets share one ID.
+  function profileId(p) {
+    const key = JSON.stringify([p?.steps, Number(p?.target_weight) || 0, Number(p?.target_volume) || 0]);
+    let hash = 2166136261;
+    for (let i = 0; i < key.length; i += 1) { hash ^= key.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+    return `profile:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
   async function request(method, fullPath, body) {
     await new Promise((resolve) => setTimeout(resolve, 30));
     const [path, query = ''] = fullPath.split('?');
@@ -423,7 +454,97 @@ export function createSim(options = {}) {
       workflow = deepMerge(workflow, body || {});
       return clone(workflow);
     }
-    if (route === 'GET /api/v1/profiles') return clone(profiles);
+    if (route === 'GET /api/v1/profiles') {
+      const vis = params.get('visibility');
+      const all = params.get('includeHidden') === 'true';
+      return clone(profiles.filter((r) => (vis ? r.visibility === vis : (all ? r.visibility !== 'deleted' : r.visibility === 'visible'))));
+    }
+    if (route === 'POST /api/v1/profiles') {
+      const id = profileId(body?.profile);
+      const existing = profiles.find((r) => r.id === id);
+      if (existing) return clone(existing);
+      const record = { id, profile: clone(body.profile), parentId: body.parentId || null, visibility: 'visible', isDefault: false, metadata: body.metadata || {}, createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString() };
+      profiles.push(record);
+      return clone(record);
+    }
+    if (route === 'GET /api/v1/profiles/export') return clone(profiles.filter((r) => r.visibility !== 'deleted'));
+    if (route === 'POST /api/v1/profiles/import') {
+      let imported = 0;
+      let skipped = 0;
+      for (const item of body || []) {
+        const p = item.profile || item;
+        const id = profileId(p);
+        if (profiles.some((r) => r.id === id)) { skipped += 1; continue; }
+        profiles.push({ id, profile: clone(p), parentId: item.parentId || null, visibility: 'visible', isDefault: false, metadata: item.metadata || {} });
+        imported += 1;
+      }
+      return { imported, skipped, failed: 0, errors: [] };
+    }
+    if (parts[0] === 'profiles' && parts.length === 3 && parts[2] === 'visibility' && method === 'PUT') {
+      const record = profiles.find((r) => r.id === decodeURIComponent(parts[1]));
+      if (!record) throw httpError(404, 'Profile not found');
+      if (record.isDefault && body?.visibility === 'deleted') throw httpError(400, 'cannot delete default profile');
+      record.visibility = body.visibility;
+      return clone(record);
+    }
+    if (parts[0] === 'profiles' && parts.length === 3 && parts[2] === 'lineage' && method === 'GET') {
+      const id = decodeURIComponent(parts[1]);
+      const record = profiles.find((r) => r.id === id);
+      if (!record) throw httpError(404, 'Profile not found');
+      const chain = [];
+      let cur = record;
+      while (cur?.parentId) { cur = profiles.find((r) => r.id === cur.parentId); if (cur) chain.unshift(cur); }
+      return clone([...chain, record, ...profiles.filter((r) => r.parentId === id)]);
+    }
+    if (route === 'GET /api/v1/beans') return clone(beans.filter((b) => params.get('includeArchived') === 'true' || !b.archived));
+    if (route === 'POST /api/v1/beans') {
+      if (!body?.roaster || !body?.name) throw httpError(400, 'roaster and name are required');
+      const bean = { decaf: false, archived: false, ...body, id: newId('bean'), createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString() };
+      beans.push(bean);
+      return clone(bean);
+    }
+    if (parts[0] === 'beans' && parts.length === 2) {
+      const bean = beans.find((b) => b.id === decodeURIComponent(parts[1]));
+      if (!bean) throw httpError(404, 'bean not found');
+      if (method === 'GET') return clone(bean);
+      if (method === 'PUT') { Object.assign(bean, body || {}, { updatedAt: new Date(now()).toISOString() }); return clone(bean); }
+      if (method === 'DELETE') {
+        beans.splice(beans.indexOf(bean), 1);
+        for (let i = batches.length - 1; i >= 0; i -= 1) if (batches[i].beanId === bean.id) batches.splice(i, 1);
+        return null;
+      }
+    }
+    if (parts[0] === 'beans' && parts[2] === 'batches') {
+      const beanId = decodeURIComponent(parts[1]);
+      if (method === 'GET') return clone(batches.filter((b) => b.beanId === beanId && (params.get('includeArchived') === 'true' || !b.archived)));
+      if (method === 'POST') {
+        const batch = { frozen: false, archived: false, ...body, beanId, id: newId('batch'), createdAt: new Date(now()).toISOString(), updatedAt: new Date(now()).toISOString() };
+        if (batch.weight != null && batch.weightRemaining == null) batch.weightRemaining = batch.weight;
+        batches.push(batch);
+        return clone(batch);
+      }
+    }
+    if (route === 'GET /api/v1/bean-batches') return clone(batches.filter((b) => params.get('includeArchived') === 'true' || !b.archived));
+    if (parts[0] === 'bean-batches' && parts.length === 2) {
+      const batch = batches.find((b) => b.id === decodeURIComponent(parts[1]));
+      if (!batch) throw httpError(404, 'batch not found');
+      if (method === 'GET') return clone(batch);
+      if (method === 'PUT') { Object.assign(batch, body || {}, { updatedAt: new Date(now()).toISOString() }); return clone(batch); }
+      if (method === 'DELETE') { batches.splice(batches.indexOf(batch), 1); return null; }
+    }
+    if (route === 'GET /api/v1/machine/settings') return clone(machineSettings);
+    if (route === 'POST /api/v1/machine/settings') {
+      const patch = { ...(body || {}) };
+      if ('usb' in patch) patch.usb = patch.usb === 'enable';
+      if ('fan' in patch) patch.fan = Math.min(50, Math.max(0, Number(patch.fan)));
+      machineSettings = { ...machineSettings, ...patch };
+      return null;
+    }
+    if (route === 'GET /api/v1/machine/settings/advanced') return clone(advanced);
+    if (route === 'POST /api/v1/machine/settings/advanced') { advanced = { ...advanced, ...(body || {}) }; return null; }
+    if (method === 'PUT' && parts[0] === 'scale' && parts[1] === 'timer') { timerLog.push(parts[2]); return null; }
+    if (route === 'POST /api/v1/display/wakelock') { display.wakeLockOverride = true; return null; }
+    if (route === 'DELETE /api/v1/display/wakelock') { display.wakeLockOverride = false; return null; }
     if (method === 'PUT' && parts[0] === 'profiles' && parts.length === 2) {
       const record = profiles.find((r) => r.id === decodeURIComponent(parts[1]));
       if (!record) throw httpError(400, 'Profile not found');
@@ -454,7 +575,15 @@ export function createSim(options = {}) {
       if (method === 'GET' && parts.length === 1) {
         const limit = Number(params.get('limit')) || 20;
         const offset = Number(params.get('offset')) || 0;
-        return { items: shots.slice(offset, offset + limit).map(listItem), total: shots.length, limit, offset };
+        const beanId = params.get('beanId');
+        const batchId = params.get('beanBatchId');
+        const list = shots.filter((sh) => {
+          const b = sh.workflow?.context?.beanBatchId;
+          if (batchId && b !== batchId) return false;
+          if (beanId && batches.find((x) => x.id === b)?.beanId !== beanId) return false;
+          return true;
+        });
+        return { items: list.slice(offset, offset + limit).map(listItem), total: list.length, limit, offset };
       }
       if (method === 'GET' && parts[1] === 'latest') {
         if (!shots.length) throw httpError(404, 'no shots');
@@ -515,5 +644,6 @@ export function createSim(options = {}) {
       publish('/ws/v1/machine/waterLevels', { currentLevel: machine.water, refillLevel: machine.refill });
     },
     get ghc() { return machine.ghc; },
+    get timerLog() { return timerLog.slice(); },
   };
 }

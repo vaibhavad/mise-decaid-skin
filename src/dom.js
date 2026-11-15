@@ -74,6 +74,8 @@ const ICONS = {
   up: 'M6 14.5l6-6 6 6',
   down: 'M6 9.5l6 6 6-6',
   compare: 'M4 17l5-6 4 3 7-8 M4 13l5-3 4 4 7-4',
+  bean: 'M12 3.5c4 0 6.5 3.8 6.5 8.5S16 20.5 12 20.5 5.5 16.7 5.5 12 8 3.5 12 3.5z M12 3.5c-2 2.5-2 5.5 0 8.5s2 6 0 8.5',
+  more: 'M6 12h.01M12 12h.01M18 12h.01',
 };
 
 export function icon(name, cls = 'icon') {

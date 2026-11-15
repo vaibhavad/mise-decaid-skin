@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.5.1.zip`.
+   **Install skin → ZIP file** and pick `mise-0.6.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -52,8 +52,9 @@ Whatever the machine is doing takes over the screen by itself:
 - **Steam, hot water and flush** show a panel with the time, the temperature
   and a Stop button, and close by themselves when done.
 
-**Recipes** (from "All recipes"), **History** and **Settings** open as sheets
-over Brew; the cross closes them.
+**Coffees** (the coffee line under the carousel), **Recipes** (from "All
+recipes"), **History** and **Settings** open as sheets over Brew; the cross
+closes them.
 
 - Recipes: search, filter (Starred, Your copies, Espresso, Filter and tea,
   Cleaning) and sort A–Z or by when you last brewed it. In Starred, the arrows
@@ -66,11 +67,50 @@ over Brew; the cross closes them.
 - Settings > **Brew screen**: show, hide and reorder the cards, hide the tank
   gauge or the last shot, and choose °C or °F.
 
+## Coffees
+
+Your coffees and their bags are kept in Decaid's own library (`/beans` and
+`/bean-batches`), so other skins and Visualizer uploads see them too.
+
+- Add a coffee (name, roaster, country, process, tasting notes), then a bag
+  (roast date, roast level, bag size). **Use** a bag and every shot records it.
+- The Brew screen shows the coffee in use, its day off roast and what is left
+  in the bag. Time in the freezer is not counted as ageing. **Freeze** and
+  **Thaw** on a bag record when.
+- After each shot Mise takes the dose off the bag (Decaid keeps the amount
+  but does not count it down). Turn this off under Settings > Shots.
+- History can be filtered to one coffee, and each shot shows the coffee and
+  how many days off roast it was.
+- Finished bags and coffees move to **Finished** rather than being deleted.
+
+## Managing recipes
+
+On a recipe's page, under **Manage**:
+
+- **Save into Decaid** (your copies): turns a copy into a real Decaid recipe,
+  linked to the recipe it came from, with its dose and grind kept in the
+  recipe's metadata. A copy must differ from the original first (Decaid gives
+  identical recipes the same ID), for example in temperature or espresso out.
+- **Save Brew screen changes into it** (recipes you made): writes the
+  temperature, espresso out, dose and grind from the Brew screen into the
+  recipe.
+- **Hide this recipe**: tidies away recipes you never use. They stay under
+  **Hidden** in Recipes and can be shown again.
+- **Export as a file**, and **Versions**: the recipe it was made from, and
+  recipes made from it.
+
+Recipes also has **Import** (a Decaid or Mise export, or one recipe from
+de1app or Visualizer, from a file or pasted) and **Export** (everything,
+including your copies). In the Decaid app, if Download does nothing, use Copy.
+
 ## Settings and recipe names
 
-Settings has Mise's own page for the everyday choices (gateway mode, scale
-rules, steam, auto-sleep, brightness). "All Decaid settings" opens Decaid's
-complete settings page for the rest.
+Settings has Mise's own pages: Brew screen, Shots (gateway mode, scale rules,
+scale timer, stop-by-weight timing), Steam and water (steam, purge mode, hot
+water and flush flow and temperature), Machine (fan, tank warming, refill kit,
+heater), Tablet (keep the screen on, brightness, charging, night mode) and
+Sleep. "All Decaid settings" opens Decaid's complete page for calibration,
+cleaning and descaling programs, firmware and connections.
 
 **Rename** on a recipe's page renames it. Recipes you made are renamed in Decaid
 itself. Decaid's built-in recipes cannot be changed, so for those the new name
@@ -120,8 +160,9 @@ To point the skin at Decaid on another device while developing, add
 
 ## What it stores
 
-- Starred recipes (and their order), your copies, display names, the cleaning
-  reminder, the weather city and the Brew screen layout (`layout`) are kept in
+- Coffees and bags are kept in Decaid's library. Starred recipes (and their
+  order), your copies, display names, the cleaning reminder, the weather city
+  and the Brew screen layout (`layout`) are kept in
   Decaid's key-value store under the `mise` namespace, so they survive a
   reinstall of the skin.
 - After each shot it adds the shot time, the weight and your taste tag to the
@@ -136,6 +177,11 @@ To point the skin at Decaid on another device while developing, add
 - Stopping by weight and saving shots are done by Decaid, not by the skin.
   If shots do not stop at the target weight, check the scale connection and
   the gateway mode in Decaid's settings.
+- The scale's timer: Decaid zeroes, starts and stops it with each shot by
+  itself in Tracking mode. In Full mode Decaid leaves that to the skin, so
+  Mise does it (Settings > Shots > Scale timer follows the shot).
+- The screen: Decaid keeps it on while the machine is awake. "Keep the screen
+  on" (Settings > Tablet) keeps it on while the machine sleeps too.
 - Mise borrows ideas from Bestpresso (GPLv3); no Bestpresso code is used.
 
 ## Layout

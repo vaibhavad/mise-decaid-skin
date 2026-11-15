@@ -8,7 +8,9 @@ import { h, setText, setAttr, show, replaceKids, icon } from '../dom.js';
 import {
   S, status, values, go, requestState, transport, tare, scan, toast, useProfile, carouselRecords, nameOf,
   openRecipe, cleaningDue, shotsSinceClean, markCleaned, selectShot, gatewayMode, waterLabel, setSteam,
+  currentBatch, beanOf,
 } from '../store.js';
+import { coffeeLine } from './coffees.js';
 import { num, trimNum, ratio, when, deg } from '../format.js';
 import { profileCurve, miniChart } from '../chart.js';
 import { edit } from './edits.js';
@@ -89,6 +91,8 @@ export function createHome() {
   const track = h('div', { class: 'carousel', 'aria-roledescription': 'carousel', 'aria-label': 'Your recipes' });
   const dots = h('div', { class: 'dots', 'aria-hidden': 'true' });
   const allLink = h('button', { class: 'link', type: 'button', onClick: () => go('recipes') }, 'All recipes', icon('chevron', 'icon link-chev'));
+  const coffeeText = h('span', { class: 'coffee-btn-text' });
+  const coffeeBtn = h('button', { class: 'coffee-btn', type: 'button', onClick: () => go('coffees') }, icon('bean', 'icon coffee-icon'), coffeeText);
   const prevBtn = h('button', { class: 'nav-arrow', type: 'button', 'aria-label': 'Previous recipe', onClick: () => step(-1) }, icon('back'));
   const nextBtn = h('button', { class: 'nav-arrow', type: 'button', 'aria-label': 'Next recipe', onClick: () => step(1) }, icon('chevron'));
   const emptyCarousel = h('div', { class: 'carousel-empty' },
@@ -212,7 +216,7 @@ export function createHome() {
 
   const stage = h('section', { class: 'stage-card' },
     h('div', { class: 'carousel-wrap' }, prevBtn, track, emptyCarousel, nextBtn),
-    h('div', { class: 'carousel-foot' }, dots, allLink),
+    h('div', { class: 'carousel-foot' }, coffeeBtn, dots, allLink),
     h('div', { class: 'vals-row' }, vTemp.el, vGrind.el, vDose.el, vOut.el),
     h('div', { class: 'next-row' }, h('span', { class: 'next-dot', 'aria-hidden': 'true' }), nextText, saving, startShot, demoPress),
     warn);
@@ -335,6 +339,16 @@ export function createHome() {
       : 'Gateway mode is Full, so shots will not stop by weight. Switch to Tracking');
   }
 
+  function updateCoffee() {
+    const batch = currentBatch();
+    const bean = beanOf(batch);
+    const name = S.workflow?.context?.coffeeName;
+    setText(coffeeText, bean ? coffeeLine(batch, bean) : (name || 'Choose a coffee'));
+    setAttr(coffeeBtn, 'data-empty', !bean && !name);
+    const left = Number(batch?.weightRemaining);
+    setAttr(coffeeBtn, 'data-low', Number.isFinite(left) && left < (values.dose() || 18) * 2);
+  }
+
   function updateLast() {
     const shot = S.shots?.[0];
     show(last, Boolean(shot) && S.layout.last !== false);
@@ -356,6 +370,7 @@ export function createHome() {
     updateCarousel();
     updateValues();
     updateNext();
+    updateCoffee();
     updateLast();
   }
 
