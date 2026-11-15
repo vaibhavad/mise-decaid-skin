@@ -21,7 +21,7 @@ import { createSettings } from './views/settings.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.5.1';
 document.documentElement.dataset.miseVersion = VERSION;
 const app = document.getElementById('app');
 const params = new URLSearchParams(location.search);

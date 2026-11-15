@@ -34,14 +34,13 @@ export function createHome() {
   // ── Water tank ──
   const tankFill = h('span', { class: 'tank-bar-fill' });
   const tankText = h('span', { class: 'tank-bar-text' });
-  const tankWord = h('span', { class: 'tank-bar-word' });
   const tank = h('button', {
     class: 'tank-bar', type: 'button',
     onClick: () => {
       const w = waterLabel();
       toast(w.level ? `Water tank: ${w.text}, ${w.word.toLowerCase()}. A full tank holds about 2 litres.` : 'Water level not known yet.');
     },
-  }, tankFill, tankWord, tankText);
+  }, tankFill, tankText);
 
   // ── Utility cards ──
   const startBtn = (state, noun) => h('button', { class: 'mini-btn', type: 'button', onClick: () => requestState(state), text: 'Start', 'aria-label': `Start ${noun}` });
@@ -279,7 +278,6 @@ export function createHome() {
     setAttr(tank, 'data-level', w.level);
     tankFill.style.height = `${Math.round(w.pct * 100)}%`;
     setText(tankText, w.text);
-    setText(tankWord, w.level ? w.word : '');
     setAttr(tank, 'aria-label', w.level ? `Water tank ${w.text}, ${w.word}` : 'Water tank');
   }
 
