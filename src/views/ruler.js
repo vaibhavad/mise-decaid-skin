@@ -17,8 +17,8 @@ export function createRuler() {
   const unit = h('span', { class: 'ruler-unit' });
   const ticks = h('div', { class: 'ruler-ticks', 'aria-hidden': 'true' });
   const track = h('div', { class: 'ruler-track', role: 'slider', tabindex: '0' }, ticks, h('span', { class: 'ruler-needle' }));
-  const minus = h('button', { class: 'ruler-nudge', type: 'button', 'aria-label': 'Less', text: '−', onClick: () => nudge(-1) });
-  const plus = h('button', { class: 'ruler-nudge', type: 'button', 'aria-label': 'More', text: '+', onClick: () => nudge(1) });
+  const minus = nudgeButton('−', 'Less', -1);
+  const plus = nudgeButton('+', 'More', 1);
   const presets = h('div', { class: 'ruler-presets' });
   const cancel = h('button', { class: 'btn btn-outline', type: 'button', text: 'Cancel', onClick: closeEditor });
   const save = h('button', { class: 'btn btn-primary', type: 'button', text: 'Save', onClick: commit });
@@ -45,7 +45,35 @@ export function createRuler() {
     current = snap(v);
     render();
   }
-  function nudge(dir) { set(current + dir * spec.step); }
+  function nudge(dir, by = 1) { set(current + dir * by * spec.step); }
+
+  // − and +: one step per tap. Held, they repeat, and speed up the longer
+  // you hold, so large ranges (espresso out goes to 1000 g) are quick.
+  function nudgeButton(label, aria, dir) {
+    const button = h('button', { class: 'ruler-nudge', type: 'button', 'aria-label': aria, text: label });
+    let delay = null;
+    let repeat = null;
+    let started = 0;
+    const stop = () => { clearTimeout(delay); clearInterval(repeat); delay = repeat = null; };
+    button.addEventListener('pointerdown', (event) => {
+      if (event.button > 0) return;
+      stop();
+      nudge(dir);
+      started = Date.now();
+      delay = setTimeout(() => {
+        repeat = setInterval(() => {
+          const held = Date.now() - started;
+          nudge(dir, held > 3000 ? 10 : held > 1500 ? 5 : 1);
+        }, 90);
+      }, 450);
+    });
+    for (const type of ['pointerup', 'pointerleave', 'pointercancel', 'blur']) button.addEventListener(type, stop);
+    button.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); nudge(dir); }
+    });
+    button.addEventListener('contextmenu', (event) => event.preventDefault());
+    return button;
+  }
   function commit() {
     const s = spec;
     const v = current;
@@ -59,8 +87,12 @@ export function createRuler() {
     const kids = [];
     for (let i = 0; i <= count; i += 1) {
       const v = spec.min + i * spec.step;
-      const big = i % major === 0;
-      kids.push(h('span', { class: big ? 'tick-mark big' : (i % (major / 2) === 0 ? 'tick-mark mid' : 'tick-mark'), style: `left:${i * PX}px` },
+      // Mark round values (0, 5, 10…), not every fifth tick from wherever
+      // the range happens to start.
+      const n = Math.round(v / spec.step);
+      const big = n % major === 0;
+      const mid = major % 2 === 0 && n % (major / 2) === 0;
+      kids.push(h('span', { class: big ? 'tick-mark big' : (mid ? 'tick-mark mid' : 'tick-mark'), style: `left:${i * PX}px` },
         big ? h('span', { class: 'tick-label', text: fmt(v) }) : null));
     }
     ticks.style.width = `${count * PX}px`;

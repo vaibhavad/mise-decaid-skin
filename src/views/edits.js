@@ -55,11 +55,14 @@ export const edit = {
     const r = (x) => Math.round(dose * x);
     openEditor({
       label: 'Espresso out', unit: 'g', hint: 'The shot stops by itself at this weight. Set 0 to stop it yourself.',
-      value: values.out(), min: 0, max: 120, step: 1, major: 10, digits: 0,
+      // Decaid sets no upper limit; 1000 g covers long drinks and filter.
+      value: values.out(), min: 0, max: 1000, step: 1, major: 10, digits: 0,
       presets: [
         { label: 'Ristretto', value: r(1.5), detail: '1 : 1.5' },
         { label: 'Normale', value: r(2), detail: '1 : 2' },
         { label: 'Lungo', value: r(3), detail: '1 : 3' },
+        { label: 'Allongé', value: r(5), detail: '1 : 5' },
+        { label: 'Filter', value: r(16), detail: '1 : 16' },
       ],
       save: setOut,
     });

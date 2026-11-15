@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.7.0.zip`.
+   **Install skin → ZIP file** and pick `mise-0.7.1.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one

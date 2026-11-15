@@ -214,11 +214,13 @@ export function createHome() {
   const warnText = h('span');
   const warn = h('button', { class: 'warn-line', type: 'button', onClick: () => go('settings') }, warnText, icon('chevron', 'icon link-chev'));
 
+  const nextRow = h('div', { class: 'next-row' }, nextText, saving, startShot, demoPress);
+  const isVisible = (node) => !node.hasAttribute('hidden');
   const stage = h('section', { class: 'stage-card' },
     h('div', { class: 'carousel-wrap' }, prevBtn, track, emptyCarousel, nextBtn),
     h('div', { class: 'carousel-foot' }, coffeeBtn, dots, allLink),
     h('div', { class: 'vals-row' }, vTemp.el, vGrind.el, vDose.el, vOut.el),
-    h('div', { class: 'next-row' }, h('span', { class: 'next-dot', 'aria-hidden': 'true' }), nextText, saving, startShot, demoPress),
+    nextRow,
     warn);
 
   // ── Last shot ──
@@ -325,12 +327,12 @@ export function createHome() {
     setAttr(stage, 'data-tone', st.tone);
     show(startShot, ready && !ghc);
     show(demoPress, S.mode === 'demo' && ready && ghc);
-    let text;
-    if (!S.machineConnected) text = 'Switch the machine on. It connects by itself.';
-    else if (!ready) text = st.tone === 'warn' ? st.sub : `${st.title}${st.sub ? ` · ${st.sub}` : ''}`;
-    else if (ghc) text = S.scaleConnected ? 'Lock in the portafilter and press espresso on the machine' : 'Press espresso on the machine. No scale, so stop it yourself.';
-    else text = S.scaleConnected ? 'Lock in the portafilter' : 'Lock in the portafilter. No scale, so stop it yourself.';
+    // No coaching: the status pill already says what the machine is doing.
+    // Only what changes how the shot will go is mentioned here.
+    let text = '';
+    if (S.machineConnected && ready && !S.scaleConnected) text = 'No scale connected, so the shot will not stop by weight.';
     setText(nextText, text);
+    show(nextRow, Boolean(text) || isVisible(startShot) || isVisible(demoPress) || Boolean(S.saving));
 
     const mode = gatewayMode();
     show(warn, mode === 'full' || mode === 'disabled');

@@ -23,7 +23,7 @@ import { createCoffees } from './views/coffees.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 document.documentElement.dataset.miseVersion = VERSION;
 watchViewport();
 const app = document.getElementById('app');

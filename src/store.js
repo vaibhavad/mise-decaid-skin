@@ -401,7 +401,8 @@ export function setDose(value) {
 }
 
 export function setOut(value) {
-  const out = Math.round(clamp(value, 0, 250));
+  // Decaid sets no upper limit on the target weight; the ruler goes to 1000 g.
+  const out = Math.round(clamp(value, 0, 1000));
   const patch = { context: { targetYield: out } };
   if (out > 0) patch.profile = { target_weight: out };
   queuePatch(patch);
