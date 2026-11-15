@@ -10,6 +10,7 @@ import {
   S, subscribe, connect, loadAll, go, requestState, heartbeat, toast, transport, reloadMachine, status, closeEditor,
 } from './store.js';
 import { deg } from './format.js';
+import { watchViewport } from './viewport.js';
 import { createHome } from './views/home.js';
 import { createShot } from './views/shot.js';
 import { createUtility } from './views/utility.js';
@@ -22,8 +23,9 @@ import { createCoffees } from './views/coffees.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 document.documentElement.dataset.miseVersion = VERSION;
+watchViewport();
 const app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 // A page can ask for the demo outright with <html data-demo>, for hosts that

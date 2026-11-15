@@ -6,7 +6,7 @@ import { h, setText, show, setAttr, replaceKids, icon } from '../dom.js';
 import {
   S, updateSettings, updatePresence, setBrightness, setSteam, setHotWater, setRinse, setCleanInterval,
   openDecaidSettings, gatewayMode, openCity, setWeatherUnit, updateLayout, moveCard, toggleCard,
-  updateMachineSetting,
+  updateMachineSetting, SLEEP_STYLES, setSleepStyle, previewSleep,
 } from '../store.js';
 import { num, clamp, deg } from '../format.js';
 import { toggleRow, choiceRow, numberRow, card, sheetHead } from './parts.js';
@@ -58,6 +58,21 @@ function homeCards() {
             sw));
       }));
     },
+  };
+}
+
+// The sleep screen's look: one tile per style.
+function styleGrid() {
+  const tiles = SLEEP_STYLES.map((st) => h('button', { class: 'style-tile', type: 'button', onClick: () => setSleepStyle(st.key) },
+    h('strong', { text: st.label }), h('span', { text: st.text })));
+  const el = h('div', null,
+    h('div', { class: 'style-grid', role: 'group', 'aria-label': 'Sleep screen style' }, tiles),
+    h('div', { class: 'style-actions' },
+      h('button', { class: 'btn btn-primary btn-small', type: 'button', text: 'Preview', onClick: () => previewSleep(true) }),
+      h('span', { class: 'set-hint', text: 'Shows the sleep screen without putting the machine to sleep.' })));
+  return {
+    el,
+    update() { tiles.forEach((t, i) => setAttr(t, 'aria-pressed', (S.layout.sleepStyle || 'weather') === SLEEP_STYLES[i].key ? 'true' : 'false')); },
   };
 }
 
@@ -252,6 +267,14 @@ export function createSettings() {
       label: 'Weather temperature', hint: '', options: [{ label: '°C', value: 'c' }, { label: '°F', value: 'f' }],
       read: () => (S.place ? S.place.unit || 'c' : null), write: setWeatherUnit,
     }),
+    warmNight: toggleRow({
+      label: 'Warm night mode', hint: 'From sunset to sunrise (or 9 pm to 6:30 am without a city) the sleep screen turns dim and amber, easier on the eyes in a dark kitchen.',
+      read: () => S.layout.warmNight !== false, write: (v) => updateLayout({ warmNight: v }),
+    }),
+    drift: toggleRow({
+      label: 'Gentle drift', hint: 'Moves the sleep screen a few pixels every couple of minutes, so nothing stays in one place long enough to mark the screen.',
+      read: () => S.layout.drift !== false, write: (v) => updateLayout({ drift: v }),
+    }),
     screenOff: numberRow({
       label: 'Screen off after', hint: 'While the machine sleeps, the clock goes dark after this long. Tap to bring it back; hold to wake the machine.',
       less: 'Sooner', more: 'Later', read: () => S.layout.screenOff || 0,
@@ -266,6 +289,7 @@ export function createSettings() {
   };
 
   const cardsList = homeCards();
+  const styles = styleGrid();
   const cityHint = h('span', { class: 'set-hint' });
   const cityRow = h('div', { class: 'set-row' },
     h('div', { class: 'set-text' }, h('span', { class: 'set-label', text: 'Weather city' }), cityHint),
@@ -280,6 +304,7 @@ export function createSettings() {
     h('button', { class: 'btn btn-outline btn-small', type: 'button', onClick: openDecaidSettings, text: 'All Decaid settings' }));
 
   const t = (title, ...kids) => card('set-card', h('h2', { class: 'card-title', text: title }), ...kids);
+  const wide = (c) => { c.classList.add('set-wide'); return c; };
   const pages = {
     brew: [
       t('Cards', h('p', { class: 'set-hint', text: 'Show, hide and order the cards beside your recipes.' }), cardsList.el),
@@ -302,8 +327,9 @@ export function createSettings() {
       t('Power', rows.charging.el, rows.night.el, rows.nightStart.el, rows.nightEnd.el, rows.scalePower.el),
     ],
     sleep: [
-      t('Machine sleep', rows.autoSleep.el, rows.sleepAfter.el),
+      wide(t('Sleep screen style', styles.el, rows.warmNight.el, rows.drift.el)),
       t('Sleep screen', cityRow, rows.weatherUnit.el, rows.screenOff.el),
+      t('Machine sleep', rows.autoSleep.el, rows.sleepAfter.el),
     ],
     mise: [
       t('Mise', rows.cleanEvery.el, decaidRow, versions),
@@ -322,7 +348,7 @@ export function createSettings() {
     tabs.forEach((b, i) => setAttr(b, 'aria-pressed', SECTIONS[i].key === section ? 'true' : 'false'));
     if (shownSection !== section) {
       shownSection = section;
-      replaceKids(body, pages[section].map((c) => h('div', { class: 'settings-col' }, c)));
+      replaceKids(body, pages[section].map((c) => h('div', { class: c.classList.contains('set-wide') ? 'settings-col settings-wide' : 'settings-col' }, c)));
       body.scrollTop = 0;
     }
   }
@@ -333,6 +359,7 @@ export function createSettings() {
     if (tt > 0) lastSteamTemp = tt;
     for (const r of Object.values(rows)) r.update();
     cardsList.update();
+    styles.update();
     show(unavailable, !S.settings);
     show(noMachine, !S.machineSettings);
     setText(cityHint, S.place

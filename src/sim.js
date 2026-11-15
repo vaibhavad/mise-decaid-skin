@@ -169,10 +169,14 @@ export function createSim(options = {}) {
   const beans = [
     { id: 'bean-guji', roaster: 'Demo roaster', name: 'Ethiopia Guji, washed', country: 'Ethiopia', processing: 'washed', notes: 'Peach, jasmine, black tea.', decaf: false, archived: false, createdAt: stamp, updatedAt: stamp },
     { id: 'bean-cerrado', roaster: 'Demo roaster', name: 'Brazil Cerrado, natural', country: 'Brazil', processing: 'natural', notes: 'Chocolate, hazelnut.', decaf: false, archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'bean-huila', roaster: 'Demo roaster', name: 'Colombia Huila, honey', country: 'Colombia', processing: 'honey', notes: 'Red apple, panela.', decaf: false, archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'bean-sumatra', roaster: 'Demo roaster', name: 'Sumatra Mandheling', country: 'Indonesia', processing: 'wet-hulled', notes: 'Cedar, dark chocolate.', decaf: false, archived: false, createdAt: stamp, updatedAt: stamp },
   ];
   const batches = [
     { id: 'batch-guji-1', beanId: 'bean-guji', roastDate: dateOnly(now() - 11 * day), roastLevel: 'light', weight: 250, weightRemaining: 182, frozen: false, archived: false, createdAt: stamp, updatedAt: stamp },
     { id: 'batch-cerrado-1', beanId: 'bean-cerrado', roastDate: dateOnly(now() - 30 * day), roastLevel: 'medium', weight: 1000, weightRemaining: 640, frozen: true, freezeDate: dateOnly(now() - 26 * day), archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'batch-huila-1', beanId: 'bean-huila', roastDate: dateOnly(now() - 19 * day), roastLevel: 'medium', weight: 340, weightRemaining: 96, frozen: false, archived: false, createdAt: stamp, updatedAt: stamp },
+    { id: 'batch-sumatra-1', beanId: 'bean-sumatra', roastDate: dateOnly(now() - 6 * day), roastLevel: 'dark', weight: 250, weightRemaining: 214, frozen: false, archived: false, createdAt: stamp, updatedAt: stamp },
     { id: 'batch-cerrado-0', beanId: 'bean-cerrado', roastDate: dateOnly(now() - 70 * day), roastLevel: 'medium', weight: 250, weightRemaining: 0, frozen: false, archived: true, createdAt: stamp, updatedAt: stamp },
   ];
   let machineSettings = { usb: true, fan: 50, flushTemp: 90, flushFlow: 6, flushTimeout: 5, hotWaterFlow: 6, steamFlow: 0.8, tankTemp: 0, steamPurgeMode: 0 };
@@ -218,7 +222,37 @@ export function createSim(options = {}) {
     op: null, drip: 0, cooldown: 0,
   };
 
-  const shots = seedHistory();
+  const shots = seedHistory().concat(seedYear());
+  const schedules = [
+    { id: 'wake-weekdays', time: '07:00', daysOfWeek: [1, 2, 3, 4, 5], enabled: true, keepAwakeFor: 60 },
+    { id: 'wake-weekend', time: '08:30', daysOfWeek: [6, 7], enabled: true, keepAwakeFor: 120 },
+  ];
+
+  // Light records for the rest of the year (no measurements), so the year
+  // view and History have something to show. Repeatable from run to run.
+  function seedYear() {
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const start = new Date(new Date(now()).getFullYear(), 0, 1).getTime();
+    const list = [];
+    const tastes = [null, null, 'Just right', 'Just right', 'A bit sour', 'A bit bitter', 'Sour', 'Bitter'];
+    const bags = ['batch-guji-1', 'batch-cerrado-1', 'batch-huila-1', 'batch-sumatra-1'];
+    for (let t = now() - 6 * day; t > start; t -= day) {
+      const weekend = [0, 6].includes(new Date(t).getDay());
+      const count = Math.floor(rnd() * (weekend ? 5 : 3.2));
+      for (let i = 0; i < count; i += 1) {
+        const at = t - (7 + i * 1.5 + rnd()) * 3600 * 1000;
+        const p = Math.floor(rnd() * 4);
+        list.push({
+          id: `shot-${iso(at)}`, timestamp: iso(at), measurements: [],
+          workflow: { name: 'Demo', profile: clone(DEMO_PROFILES[p]), context: { ...workflow.context, beanBatchId: bags[Math.floor(rnd() * bags.length)], targetYield: DEMO_PROFILES[p].target_weight } },
+          annotations: { actualDoseWeight: 18, actualYield: 34 + Math.round(rnd() * 60) / 10, extras: { mise: { seconds: 26 + Math.round(rnd() * 120) / 10, taste: tastes[Math.floor(rnd() * tastes.length)] } } },
+          stopReason: 'targetWeight',
+        });
+      }
+    }
+    return list.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  }
 
   function seedHistory() {
     const plan = [
@@ -438,7 +472,8 @@ export function createSim(options = {}) {
     if (route === 'POST /api/v1/machine/heartbeat') return { timeout: 1800 };
     if (route === 'GET /api/v1/settings') return clone(settings);
     if (route === 'POST /api/v1/settings') { settings = { ...settings, ...(body || {}) }; return clone(settings); }
-    if (route === 'GET /api/v1/presence/settings') return { ...presence, schedules: [] };
+    if (route === 'GET /api/v1/presence/settings') return { ...presence, schedules: clone(schedules) };
+    if (route === 'GET /api/v1/presence/schedules') return clone(schedules);
     if (route === 'POST /api/v1/presence/settings') { presence = { ...presence, ...(body || {}) }; return clone(presence); }
     if (route === 'GET /api/v1/display') return clone(display);
     if (route === 'PUT /api/v1/display/brightness') {

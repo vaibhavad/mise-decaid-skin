@@ -42,9 +42,9 @@ export async function fetchWeather(place) {
     latitude: String(place.latitude),
     longitude: String(place.longitude),
     current: 'temperature_2m,weather_code,is_day',
-    daily: 'temperature_2m_max,temperature_2m_min',
+    daily: 'temperature_2m_max,temperature_2m_min,sunrise,sunset',
     timezone: 'auto',
-    forecast_days: '1',
+    forecast_days: '2',
   });
   if (place.unit === 'f') params.set('temperature_unit', 'fahrenheit');
   const data = await getJson(`https://api.open-meteo.com/v1/forecast?${params}`);
@@ -57,6 +57,10 @@ export async function fetchWeather(place) {
     isDay: current.is_day !== 0,
     hi: num(data.daily?.temperature_2m_max?.[0]),
     lo: num(data.daily?.temperature_2m_min?.[0]),
+    // Local times for today and tomorrow, as "2026-11-15T07:01".
+    sunrise: (data.daily?.sunrise || []).filter(Boolean),
+    sunset: (data.daily?.sunset || []).filter(Boolean),
+    tempC: place.unit === 'f' ? (current.temperature_2m - 32) * 5 / 9 : current.temperature_2m,
     place: place.name,
     at: Date.now(),
   };
@@ -78,6 +82,7 @@ export async function searchPlaces(query) {
 // ── Demo mode: no network, a fixed set of skies to step through ──
 
 const DEMO = [
+  { code: 0, temp: -4, isDay: false, hi: 1, lo: -7 },
   { code: 71, temp: -2, isDay: true, hi: 1, lo: -6 },
   { code: 0, temp: 21, isDay: true, hi: 24, lo: 13 },
   { code: 2, temp: 17, isDay: true, hi: 19, lo: 11 },
@@ -91,7 +96,17 @@ const DEMO = [
 export function demoWeather(index, unit) {
   const d = DEMO[index % DEMO.length];
   const t = (c) => (unit === 'f' ? Math.round(c * 9 / 5 + 32) : c);
-  return { ...describe(d.code), temp: t(d.temp), isDay: d.isDay, hi: t(d.hi), lo: t(d.lo), place: 'Demo city', at: Date.now() };
+  const day = (offset, hh, mm) => {
+    const x = new Date();
+    x.setDate(x.getDate() + offset);
+    x.setHours(hh, mm, 0, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(hh)}:${pad(mm)}`;
+  };
+  return {
+    ...describe(d.code), temp: t(d.temp), tempC: d.temp, isDay: d.isDay, hi: t(d.hi), lo: t(d.lo), place: 'Demo city', at: Date.now(),
+    sunrise: [day(0, 7, 2), day(1, 7, 3)], sunset: [day(0, 16, 51), day(1, 16, 50)],
+  };
 }
 
 export async function demoPlaces(query) {

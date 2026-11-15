@@ -5,7 +5,7 @@ import { clamp, roundTo, deepMerge, brewTemp, stepsAtTemp, summarizeShot, sample
 import { fetchWeather, searchPlaces, demoWeather, demoPlaces } from './weather.js';
 
 export const UTILITY_CARDS = ['hotWater', 'steam', 'flush', 'scale'];
-export const DEFAULT_LAYOUT = { cards: UTILITY_CARDS.slice(), hidden: [], tank: true, last: true, unit: 'c', screenOff: 0, deductDose: true, scaleTimer: true };
+export const DEFAULT_LAYOUT = { cards: UTILITY_CARDS.slice(), hidden: [], tank: true, last: true, unit: 'c', screenOff: 0, deductDose: true, scaleTimer: true, sleepStyle: 'weather', warmNight: true, drift: true };
 
 export const S = {
   mode: 'connecting',        // connecting | live | demo | offline
@@ -49,6 +49,9 @@ export const S = {
   hiddenProfiles: [],        // recipes you hid
   lineage: {},               // recipe id -> its versions
   machineSettings: null,     // fan, tank, purge mode…
+  sleepPreview: false,       // showing the sleep screen from Settings
+  yearShots: null,           // this year's shots, light: { t, taste, batch }
+  schedules: null,           // Decaid's wake schedules
   advanced: null,            // heater settings
 };
 
@@ -1380,4 +1383,77 @@ export async function updateMachineSetting(patch, advanced = false) {
     toast(NOT_SAVED);
   }
   emit();
+}
+
+
+// ── Sleep screen data ────────────────────────────────────────────────────
+
+export const SLEEP_STYLES = [
+  { key: 'weather', label: 'Weather sky', text: 'The time over a sky that matches the weather outside.' },
+  { key: 'pet', label: 'Machine pet', text: 'A little espresso machine asleep, with a mood that follows the real one.' },
+  { key: 'hourglass', label: 'Grounds hourglass', text: 'Grounds fall through the hour; the pile below is this week\'s shots.' },
+  { key: 'fingerprints', label: 'Shot fingerprints', text: 'Today\'s shots drawn as slowly turning patterns from their curves.' },
+  { key: 'lava', label: 'Crema lava lamp', text: 'Slow crema blobs, one colour for each bag you have open.' },
+  { key: 'year', label: 'A year in coffee', text: 'One dot for every day of the year, brighter on busier days.' },
+  { key: 'journey', label: 'Bean journey', text: 'Where your open bags were grown, and how far they came to your cup.' },
+  { key: 'board', label: 'Departure board', text: 'Next wake, your bags, cleaning and water, on flipping letters.' },
+  { key: 'moon', label: 'Moon and sunrise', text: 'Tonight\'s moon, a countdown to sunrise, and an aurora on clear cold nights.' },
+];
+
+export function previewSleep(on) {
+  S.sleepPreview = Boolean(on);
+  emit();
+}
+
+export function setSleepStyle(key) {
+  updateLayout({ sleepStyle: key });
+}
+
+// Bags you are using now: not finished, not in the freezer, not empty. The
+// one in use comes first.
+export function openBags() {
+  const inUse = S.workflow?.context?.beanBatchId;
+  return S.batches
+    .filter((b) => !b.archived && !b.frozen && !(Number(b.weightRemaining ?? b.weight ?? 1) <= 0))
+    .map((b) => ({ batch: b, bean: beanOf(b), inUse: b.id === inUse }))
+    .filter((x) => x.bean)
+    .sort((a, b) => (b.inUse - a.inUse) || (Date.parse(b.batch.roastDate || 0) - Date.parse(a.batch.roastDate || 0)));
+}
+
+let yearAt = 0;
+export async function loadYear(force = false) {
+  if (!T || (!force && Date.now() - yearAt < 30 * 60 * 1000 && S.yearShots)) return;
+  yearAt = Date.now();
+  const start = new Date(new Date().getFullYear(), 0, 1).getTime();
+  const page = await quiet(T.request('GET', api('/shots?limit=1000&offset=0')));
+  const items = Array.isArray(page) ? page : page?.items;
+  if (!Array.isArray(items)) return;
+  S.yearShots = items
+    .map((s) => ({ t: Date.parse(s.timestamp), taste: s.annotations?.extras?.mise?.taste || null, batch: s.workflow?.context?.beanBatchId || null, id: s.id }))
+    .filter((s) => Number.isFinite(s.t) && s.t >= start);
+  emit();
+}
+
+export async function loadSchedules() {
+  const list = await quiet(T.request('GET', api('/presence/schedules')));
+  if (Array.isArray(list)) { S.schedules = list; emit(); }
+}
+
+// The next time a wake schedule fires, or null.
+export function nextWake(now = new Date()) {
+  let best = null;
+  for (const s of S.schedules || []) {
+    if (!s.enabled || !/^\d{1,2}:\d{2}$/.test(s.time || '')) continue;
+    const [hh, mm] = s.time.split(':').map(Number);
+    for (let add = 0; add < 8; add += 1) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + add);
+      d.setHours(hh, mm, 0, 0);
+      const iso = ((d.getDay() + 6) % 7) + 1;
+      if (d <= now || (s.daysOfWeek?.length && !s.daysOfWeek.includes(iso))) continue;
+      if (!best || d < best.at) best = { at: d, schedule: s };
+      break;
+    }
+  }
+  return best;
 }

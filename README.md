@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.6.0.zip`.
+   **Install skin → ZIP file** and pick `mise-0.7.0.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -129,17 +129,46 @@ recipes. Copies are therefore kept by Mise in Decaid's key-value store
 (`mise/recipes`). Other skins do not list them, but shots pulled with a copy
 are saved in Decaid's history under the copy's name.
 
-## Sleep screen and weather
+## Sleep screen
 
-The sleep screen shows the time, the date and, once you choose a city under
-Settings > Sleep screen, the current weather with a sky to match. Weather comes
-from [Open-Meteo](https://open-meteo.com/) (free for non-commercial use, data
-under CC BY 4.0). The only thing sent is the latitude and longitude of the
-chosen city, straight from the tablet to Open-Meteo. Without a city, or without
-an internet connection, the screen shows the time only.
+Choose a style under Settings > Sleep > **Sleep screen style**, and use
+**Preview** to see it without putting the machine to sleep (Previous and Next
+step through the styles). Every style shows the time; hold anywhere for a
+second, or tap Wake up, to wake the machine.
 
-Settings > Sleep screen > **Screen off after** makes the clock go dark after a
-while. Tap to bring it back; hold for a second to wake the machine.
+- **Weather sky**: the weather for the city you choose, with a sky to match.
+- **Machine pet**: a little espresso machine asleep on the counter. It is
+  thirsty when the tank is low, grumpy when the group needs cleaning, hungry
+  when a bag is nearly empty and proud after a shot you rated just right.
+  Tap it and it stirs.
+- **Grounds hourglass**: grounds fall through the hour; the pile below is this
+  week's shots, one layer each, coloured by how they tasted.
+- **Shot fingerprints**: today's shots (or your latest) drawn as slowly turning
+  patterns made from their pressure, flow and weight curves.
+- **Crema lava lamp**: slow crema blobs, one colour for each bag you have open,
+  from its roast level.
+- **A year in coffee**: one dot for each day of the year around the clock,
+  brighter on days you brewed more, with your total and longest streak.
+- **Bean journey**: a turning globe with the coffee belt, and an arc from where
+  each open bag was grown to your city, with the distance.
+- **Departure board**: flipping letters with the next wake time (from Decaid's
+  wake schedules), the recipe and dose, every open bag (day off roast, grams
+  and shots left), cleaning, water and the last shot.
+- **Moon and sunrise**: tonight's moon in its real phase, a countdown to
+  sunrise (or sunset), and an aurora on clear nights below freezing.
+
+"Open bags" are the bags in Coffees that are not finished, frozen or empty, so
+several can show at once; the one in use comes first.
+
+Two switches apply to every style: **Warm night mode** turns the screen dim and
+amber from sunset to sunrise (9 pm to 6:30 am without a city), and **Gentle
+drift** moves everything a few pixels every couple of minutes so nothing marks
+the screen. **Screen off after** makes it go dark after a while; tap to bring
+it back.
+
+Weather, sunrise and sunset come from [Open-Meteo](https://open-meteo.com/)
+(free for non-commercial use, data under CC BY 4.0). The only thing sent is the
+latitude and longitude of the city you choose, straight from the tablet.
 
 ## Leaving the skin
 
@@ -190,12 +219,14 @@ To point the skin at Decaid on another device while developing, add
     skin-manifest.json   id, name and version, read by Decaid
     styles.css           all styling; sizes follow the screen
     src/main.js          start-up and screen switching
+    src/viewport.js      keeps the layout full size when the keyboard opens
     src/store.js         state and every action
     src/api.js           REST and WebSocket transport
     src/sim.js           the pretend machine behind demo mode
     src/chart.js         shot chart and recipe-shape preview
     src/weather.js       weather lookup for the sleep screen
     src/views/           one file per screen
+    src/views/sleep/     the sleep screen styles
     fonts/               Inter and Space Grotesk (SIL Open Font License)
 
 There is no build step: the files in this folder are what runs.
