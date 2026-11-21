@@ -24,7 +24,7 @@ import { createEditor } from './views/editor.js';
 import { createSleep } from './views/sleep.js';
 import { createDialogs } from './views/dialogs.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.9.1';
 document.documentElement.dataset.miseVersion = VERSION;
 watchViewport();
 const app = document.getElementById('app');

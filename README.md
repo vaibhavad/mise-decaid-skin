@@ -7,7 +7,7 @@ and WebSocket API on port 8080. It does not work with the older de1app.
 ## Install
 
 1. In the Decaid app, open **Launcher → Skins**, open the cogwheel menu, then
-   **Install skin → ZIP file** and pick `mise-0.9.0.zip`.
+   **Install skin → ZIP file** and pick `mise-0.9.1.zip`.
 2. Select **Mise** in that same skin list.
 
 Switch skins only from this screen in the app. The web settings page (the one
@@ -242,3 +242,9 @@ To point the skin at Decaid on another device while developing, add
     fonts/               Inter and Space Grotesk (SIL Open Font License)
 
 There is no build step: the files in this folder are what runs.
+
+## Voice lab
+
+Tests for a future voice mode. Open `http://localhost:3000/lab/` in **Chrome**
+on the tablet (not inside Decaid, which doesn't give skins the microphone).
+See `tools/voicelab/README.md` in the repository for the Jev test.

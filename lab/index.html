@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mise voice lab</title>
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Mise <span>voice lab</span></div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="hear" aria-selected="true">1 · Hearing</button>
+    <button role="tab" data-tab="words">2 · Words</button>
+    <button role="tab" data-tab="yours">3 · Your phrases</button>
+    <button role="tab" data-tab="results">Results</button>
+  </nav>
+  <a class="back" href="../">Back to Mise</a>
+</header>
+
+<div id="env" class="env"></div>
+
+<main>
+  <!-- 1. Hearing -->
+  <section id="tab-hear" class="tab">
+    <div class="col">
+      <h1>Does the tablet hear you?</h1>
+      <p class="lead">Measure each situation for five seconds. The first three are noise: stay quiet while it runs. The last two are you talking normally, as you would to the machine.</p>
+      <div class="meter"><div class="meter-fill" id="meter"></div><span id="meter-db">— dB</span></div>
+      <div class="row">
+        <button class="btn" id="mic-start">Turn on the microphone</button>
+        <button class="btn btn-outline" id="rec-play" disabled>Record 5 s and play it back</button>
+        <audio id="playback" controls hidden></audio>
+      </div>
+      <div class="situations" id="situations"></div>
+    </div>
+    <div class="col">
+      <h2>Your voice above the noise</h2>
+      <p class="muted small">How much louder your voice is than each noise. Above 15 dB is comfortable, 6–15 dB is workable, below 6 dB will struggle.</p>
+      <table class="grid" id="margins"></table>
+    </div>
+  </section>
+
+  <!-- 2. Words -->
+  <section id="tab-words" class="tab" hidden>
+    <div class="col">
+      <h1>Does it get the coffee words right?</h1>
+      <div class="setup">
+        <label>Situation <select id="w-cond">
+          <option value="quiet">Quiet</option><option value="grinder">Grinder running</option>
+          <option value="pump">Pump running</option><option value="steam">Steaming</option>
+          <option value="talk">Music or people talking</option>
+        </select></label>
+        <label>Distance <select id="w-dist">
+          <option value="near">Close to the tablet</option><option value="stand">Where I usually stand</option>
+          <option value="far">Across the room</option>
+        </select></label>
+        <label class="check" id="hint-wrap" hidden><input type="checkbox" id="w-hints" checked> Hint coffee words to the recogniser</label>
+      </div>
+      <div class="card say">
+        <div class="say-count" id="w-count"></div>
+        <div class="say-text" id="w-say"></div>
+        <div class="heard" id="w-heard"></div>
+        <div class="score" id="w-score"></div>
+        <div class="row">
+          <button class="btn btn-big" id="w-listen">Listen</button>
+          <button class="btn btn-outline" id="w-next">Next</button>
+          <button class="btn btn-outline" id="w-skip">Skip</button>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <h2>By situation</h2>
+      <table class="grid" id="w-summary"></table>
+      <p class="muted small">Key words: the names and numbers that matter. Words: every word, with units ignored.</p>
+    </div>
+  </section>
+
+  <!-- 3. Your phrases -->
+  <section id="tab-yours" class="tab" hidden>
+    <div class="col">
+      <h1>Say it your way</h1>
+      <p class="lead">Each card describes what you want. Say it the way you naturally would; don't read the card. These become the test set for Jev.</p>
+      <div class="card say">
+        <div class="say-count" id="y-count"></div>
+        <div class="say-text scenario" id="y-scene"></div>
+        <div class="heard" id="y-heard"></div>
+        <div class="row">
+          <button class="btn btn-big" id="y-listen">Listen</button>
+          <button class="btn btn-outline" id="y-next">Next</button>
+          <button class="btn btn-outline" id="y-skip">Skip</button>
+          <button class="btn btn-outline" id="y-again">Another way</button>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <h2>Collected</h2>
+      <ol class="collected" id="y-list"></ol>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section id="tab-results" class="tab" hidden>
+    <div class="col">
+      <h1>Results</h1>
+      <p class="lead">Everything is saved in Decaid as you go. Download the file and send it to Claude, or keep it for the Jev test.</p>
+      <div class="row">
+        <button class="btn" id="r-download">Download results</button>
+        <button class="btn btn-outline" id="r-copy">Copy</button>
+        <button class="btn btn-outline btn-danger" id="r-clear">Clear everything</button>
+      </div>
+      <pre class="summary" id="r-summary"></pre>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="lab.js"></script>
+</body>
+</html>
